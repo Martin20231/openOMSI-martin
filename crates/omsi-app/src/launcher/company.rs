@@ -217,7 +217,15 @@ fn found(l: &mut Launcher, area: Rect) {
     } else {
         l.ui.text_in("No maps found (Setup)", Rect::new(inner.x, y, half, ROW), 13.0, Weight::Regular, DANGER, Align::Left);
     }
-    l.ui.text_input("co-depot", Rect::new(inner.x + half + GAP, y, half, ROW), &mut l.company.depot, "Depot", None);
+    // (the depot is one of the map's entry points: there the company's buses wait in the game)
+    let names = l.state.maps.get(l.company.map).map(depot_names_of).unwrap_or_default();
+    if names.is_empty() {
+        l.ui.text_input("co-depot", Rect::new(inner.x + half + GAP, y, half, ROW), &mut l.company.depot, "Depot", None);
+    } else {
+        let mut k = names.iter().position(|n| n.eq_ignore_ascii_case(l.company.depot.trim())).unwrap_or(0);
+        l.ui.select("co-depot", Rect::new(inner.x + half + GAP, y, half, ROW), &mut k, &names);
+        l.company.depot = names[k.min(names.len() - 1)].clone();
+    }
     y += ROW + 14.0;
     l.ui.label(Rect::new(inner.x, y, inner.w, 18.0), "Company colour");
     y += 24.0;
@@ -303,6 +311,11 @@ fn found(l: &mut Launcher, area: Rect) {
 
 // --- overview -------------------------------------------------------------------------------
 
+/// The depots a map offers: its entry points' names once each, the depot-sounding first.
+fn depot_names_of(m: &core::MapInfo) -> Vec<String> {
+    company::depot_names(&m.entry_points.iter().map(|e| e.name.clone()).collect::<Vec<_>>())
+}
+
 fn tile(ui: &mut Ui, r: Rect, label: &str, value: &str, sub: &str, sub_c: Color) {
     ui.panel(r);
     ui.text_in(&tr(label).to_uppercase(), Rect::new(r.x + 16.0, r.y + 10.0, r.w - 32.0, 18.0), 11.0, Weight::Bold, TEXT_DIM, Align::Left);
@@ -367,20 +380,64 @@ fn overview(l: &mut Launcher, body: Rect) {
     let inner = l.ui.heading(side.pad(18.0, 12.0), "Notices", None);
     let free = l.state.lines.iter().filter(|x| !c.lines.contains(&x.name)).count();
     let notes = c.notices(free);
+    // the depot and the two ways to drive, at the bottom
+    let br = Rect::new(inner.x, side.bottom() - 18.0 - 44.0, inner.w, 44.0);
+    let sb = Rect::new(inner.x, br.y - 52.0, inner.w, 44.0);
+    let sel = Rect::new(inner.x, sb.y - ROW - 12.0, inner.w, ROW);
     let mut yy = inner.y;
     if notes.is_empty() {
         l.ui.text_in("All is well.", Rect::new(inner.x, yy, inner.w, 22.0), 13.0, Weight::Regular, OK, Align::Left);
         yy += 30.0;
     }
     for (sev, tmpl, val) in notes.iter().take(8) {
+        if yy > sel.y - 60.0 {
+            break;
+        }
         let col = [ACCENT_2, WARN, DANGER][(*sev as usize).min(2)];
         l.ui.p().circle(Vec2::new(inner.x + 5.0, yy + 11.0), 4.0, col);
         let text = tr(tmpl).replace("{}", val);
         let hgt = l.ui.paragraph(&text, Vec2::new(inner.x + 18.0, yy + 4.0), inner.w - 18.0, 12.5, Weight::Regular, TEXT_SOFT);
         yy += hgt.max(18.0) + 12.0;
     }
+    // the depot: where the buses that drive no line wait in the game
+    let map_info = l.state.maps.iter().find(|m| m.file == c.map).cloned();
+    let names = map_info.as_ref().map(depot_names_of).unwrap_or_default();
+    l.ui.label(Rect::new(sel.x, sel.y - 22.0, sel.w, 18.0), "Depot (your buses wait there in the game)");
+    if names.is_empty() {
+        l.ui.text_in(&c.depot, sel, 13.0, Weight::Regular, TEXT, Align::Left);
+    } else {
+        let known = names.iter().position(|n| n.eq_ignore_ascii_case(c.depot.trim()));
+        let mut k = known.unwrap_or(0);
+        if l.ui.select("co-depot-pick", sel, &mut k, &names) || known.is_none() {
+            if let Some(co) = l.company.company.as_mut() {
+                co.depot = names[k.min(names.len() - 1)].clone();
+            }
+            l.company.save(&mut l.state);
+        }
+    }
+    if l.ui.button("co-depot-start", sb, "Start at the depot", Some("garage"), ButtonKind::Normal) {
+        let depot = l.company.company.as_ref().map(|co| co.depot.clone()).unwrap_or_default();
+        let entries: Vec<String> = map_info.as_ref().map(|m| m.entry_points.iter().map(|e| e.name.clone()).collect()).unwrap_or_default();
+        match company::depot_entries(&entries, &depot).first() {
+            Some(&i) => {
+                l.state.choice.map = c.map.clone();
+                l.state.choice.entry = i as i32;
+                l.state.choice.free = true;
+                if let Some(b) = c.buses.iter().filter(|b| b.condition > 0.0).max_by(|a, b| a.condition.total_cmp(&b.condition)) {
+                    if !company::same_file(&l.state.choice.bus, &b.file) {
+                        l.state.choice.bus = b.file.clone();
+                        l.state.choice.paint.clear();
+                        l.state.choice.number.clear();
+                    }
+                }
+                l.state.load_lines();
+                l.state.touched();
+                l.state.launch();
+            }
+            None => l.state.set_status(tr("This map has no start point for the depot"), true),
+        }
+    }
     // drive for the company: the Drive page with the company's map and a bus of its own
-    let br = Rect::new(inner.x, side.bottom() - 18.0 - 44.0, inner.w, 44.0);
     if l.ui.button("co-drive", br, "Drive a duty for the company", Some("directions_bus"), ButtonKind::Primary) {
         l.state.choice.map = c.map.clone();
         if let Some(b) = c.buses.iter().filter(|b| b.condition > 0.0).max_by(|a, b| a.condition.total_cmp(&b.condition)) {

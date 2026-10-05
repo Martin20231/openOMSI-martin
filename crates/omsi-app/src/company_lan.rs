@@ -169,7 +169,7 @@ impl App {
             crashes: k.crashes[0],
             hurt: k.crashes[1],
             line: self.args.line.clone(),
-            bus: self.args.bus.clone().unwrap_or_default(),
+            bus: self.driven_bus_file(),
         };
         let text = run_command(self.company_run_id, last, &r);
         if let Some(l) = self.lan.as_mut().filter(|l| l.role == omsi_net::Role::Client) {

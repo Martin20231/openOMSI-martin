@@ -34,6 +34,7 @@ mod camera_arm;
 mod career;
 mod describe;
 mod company_lan;
+mod depot;
 mod editor;
 mod spline_editor;
 mod game_lists;

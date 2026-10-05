@@ -22867,6 +22867,7 @@ _version: 2
 
 "Depot":
   fr: "Dépôt"
+  de: "Betriebshof"
 
 "Station":
   fr: "Gare"
@@ -23772,3 +23773,18 @@ _version: 2
 
 "Host a multiplayer session on the company's map: the friends who join see its account, and what they earn is booked here after the session.":
   de: "Hoste eine Mehrspieler-Sitzung auf der Karte der Firma: Deine Freunde sehen den Kontostand, und was sie verdienen, wird nach der Sitzung hier verbucht."
+
+"{n} company buses wait on the depot {name}. Get out (Ctrl+Shift+G), walk to the driver's door and press G":
+  de: "{n} Firmenbusse warten auf dem Betriebshof {name}. Aussteigen (Strg+Umschalt+G), zur Fahrertür laufen und G drücken"
+
+"No depot of your company on this map: choose it in the launcher under Company":
+  de: "Kein Betriebshof deiner Firma auf dieser Karte: wähle ihn im Launcher unter Unternehmen"
+
+"Depot (your buses wait there in the game)":
+  de: "Betriebshof (dort warten deine Busse im Spiel)"
+
+"Start at the depot":
+  de: "Am Betriebshof starten"
+
+"This map has no start point for the depot":
+  de: "Diese Karte hat keinen Startpunkt für den Betriebshof"

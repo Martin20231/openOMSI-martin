@@ -97,6 +97,8 @@ pub struct Tuning {
     pub workshop_share: f64,
     /// A sold bus fetches this share of its price (less its wear).
     pub resale_share: f64,
+    /// At most this many of the company's buses stand on its depot in the game.
+    pub depot_buses: f64,
 }
 
 impl Default for Tuning {
@@ -121,6 +123,7 @@ impl Default for Tuning {
             price_small: 90_000.0,
             workshop_share: 0.25,
             resale_share: 0.5,
+            depot_buses: 12.0,
         }
     }
 }
@@ -139,7 +142,7 @@ const RULE_KEYS: [(&str, &str); 10] = [
     ("ki_einnahmen_pro_stunde", "Fahrkarten eines KI-Fahrers pro Stunde bei vollem Können (€)"),
     ("leihbus_pro_stunde", "Leihgebühr pro Stunde für einen Bus, der nicht der Firma gehört (€)"),
 ];
-const GENERAL_KEYS: [(&str, &str); 10] = [
+const GENERAL_KEYS: [(&str, &str); 11] = [
     ("stunden_pro_tag", "So viele Stunden Fahrzeit sind ein Firmentag"),
     ("liter_pro_km", "Dieselverbrauch eines Busses (Liter pro km)"),
     ("ki_tempo", "Durchschnittstempo der KI-Busse auf ihrer Linie (km/h)"),
@@ -150,6 +153,7 @@ const GENERAL_KEYS: [(&str, &str); 10] = [
     ("preis_kleinbus", "Neupreis eines Kleinbusses (€)"),
     ("werkstatt_anteil", "Werkstatt: dieser Anteil vom Neupreis für einen ganz verschlissenen Bus"),
     ("verkauf_anteil", "Verkauf: dieser Anteil vom Neupreis (abzüglich Verschleiß)"),
+    ("betriebshof_max_busse", "So viele Firmenbusse stehen im Spiel höchstens auf dem Betriebshof"),
 ];
 
 impl Rules {
@@ -181,7 +185,8 @@ impl Tuning {
             6 => &mut self.price_articulated,
             7 => &mut self.price_small,
             8 => &mut self.workshop_share,
-            _ => &mut self.resale_share,
+            9 => &mut self.resale_share,
+            _ => &mut self.depot_buses,
         }
     }
 
@@ -1036,6 +1041,80 @@ pub fn money(v: f64) -> String {
     format!("{}{} €", if neg { "−" } else { "" }, out)
 }
 
+/// An entry point's name without the number the launcher gives repeated ones ("Hof (2)").
+pub fn depot_base(name: &str) -> &str {
+    let n = name.trim();
+    if let Some(open) = n.rfind(" (") {
+        let inner = &n[open + 2..];
+        if inner.ends_with(')') && inner.len() > 1 && inner[..inner.len() - 1].chars().all(|c| c.is_ascii_digit()) {
+            return n[..open].trim_end();
+        }
+    }
+    n
+}
+
+/// Words that name a depot in a map's entry points (German maps mostly).
+const DEPOT_WORDS: [&str; 6] = ["betriebshof", "depot", "garage", "remise", "bvhof", "busbahnhof"];
+
+/// The depots a map offers to choose from: its entry points' names once each, those that
+/// sound like a depot first.
+pub fn depot_names(entries: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for e in entries {
+        let b = depot_base(e);
+        if !b.is_empty() && !out.iter().any(|o| o.eq_ignore_ascii_case(b)) {
+            out.push(b.to_string());
+        }
+    }
+    let is_depot = |n: &str| DEPOT_WORDS.iter().any(|w| n.to_lowercase().contains(w));
+    out.sort_by_key(|n| !is_depot(n));
+    out
+}
+
+/// The entry points (their places in the list) of the depot named `depot`: those of that
+/// name, else those that sound like a depot. Empty when the map has neither.
+pub fn depot_entries(entries: &[String], depot: &str) -> Vec<usize> {
+    let want = depot_base(depot).to_lowercase();
+    let exact: Vec<usize> = entries.iter().enumerate().filter(|(_, e)| !want.is_empty() && depot_base(e).to_lowercase() == want).map(|(i, _)| i).collect();
+    if !exact.is_empty() {
+        return exact;
+    }
+    // (the first depot-sounding name and the entries that share it)
+    let first = entries.iter().map(|e| depot_base(e).to_lowercase()).find(|n| DEPOT_WORDS.iter().any(|w| n.contains(w)));
+    match first {
+        Some(f) => entries.iter().enumerate().filter(|(_, e)| depot_base(e).to_lowercase() == f).map(|(i, _)| i).collect(),
+        None => Vec::new(),
+    }
+}
+
+/// The company's buses that wait on its depot in the game, in the order they are put down:
+/// not those on the road for its hired drivers (`on_lines`: with the timetable's buses), nor
+/// the one the player drives (`driven`, the file); the worn ones (under 30 %) last, apart.
+pub fn depot_buses<'a>(c: &'a Company, on_lines: bool, driven: Option<&str>) -> Vec<&'a Bus> {
+    let mut busy: Vec<u32> = Vec::new();
+    if on_lines {
+        for line in &c.lines {
+            let drivers = c.drivers.iter().filter(|d| &d.line == line).count();
+            busy.extend(c.buses.iter().filter(|b| &b.line == line && b.condition > 0.0).take(drivers).map(|b| b.nr));
+        }
+    }
+    let mut skip_driven = driven.filter(|d| !d.trim().is_empty());
+    let mut out: Vec<&Bus> = Vec::new();
+    for b in &c.buses {
+        if busy.contains(&b.nr) {
+            continue;
+        }
+        if skip_driven.is_some_and(|d| same_file(&b.file, d)) {
+            skip_driven = None;
+            continue;
+        }
+        out.push(b);
+    }
+    out.sort_by(|a, b| (a.condition < 30.0).cmp(&(b.condition < 30.0)).then(b.condition.total_cmp(&a.condition)));
+    out.truncate(tuning().depot_buses.max(0.0) as usize);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1254,5 +1333,35 @@ mod tests {
         let c = candidates(42);
         assert_eq!(c.len(), 3);
         assert!(c[2].skill > c[0].skill && c[2].wage > c[0].wage);
+    }
+
+    #[test]
+    fn a_depot_is_found_by_its_name_or_by_sounding_like_one() {
+        let e: Vec<String> = ["Rathaus Spandau", "Betriebshof Spandau (1)", "Betriebshof Spandau (2)", "Zoo", "Betriebshof Spandau (3)"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(depot_base("Betriebshof Spandau (12)"), "Betriebshof Spandau");
+        assert_eq!(depot_base("Linie (S)"), "Linie (S)");
+        assert_eq!(depot_names(&e), vec!["Betriebshof Spandau", "Rathaus Spandau", "Zoo"]);
+        assert_eq!(depot_entries(&e, "betriebshof spandau"), vec![1, 2, 4]);
+        assert_eq!(depot_entries(&e, "Zoo"), vec![3]);
+        assert_eq!(depot_entries(&e, "Depot"), vec![1, 2, 4], "an unknown name: the depot-sounding entries");
+        assert!(depot_entries(&["Zoo".to_string()], "Depot").is_empty());
+    }
+
+    #[test]
+    fn the_depot_holds_the_buses_not_on_the_road_the_worn_ones_last() {
+        let mut c = Company::found("Test", "T", 0, "maps/x/global.cfg", "Hof", Level::Easy, 1);
+        c.balance = 10_000_000.0;
+        for k in 0..4 {
+            c.buy(&format!("Vehicles/B{k}/b.bus"), &format!("Bus {k}")).unwrap();
+        }
+        c.buses[0].condition = 20.0;
+        c.take_line("136");
+        c.assign_bus(c.buses[1].nr, "136");
+        c.hire(candidates(1)[0].clone());
+        c.assign_driver(0, "136");
+        let nrs = |v: Vec<&Bus>| v.iter().map(|b| b.nr).collect::<Vec<_>>();
+        let (n0, n1, n2, n3) = (c.buses[0].nr, c.buses[1].nr, c.buses[2].nr, c.buses[3].nr);
+        assert_eq!(nrs(depot_buses(&c, true, Some("vehicles/b2/b.bus"))), vec![n3, n0]);
+        assert_eq!(nrs(depot_buses(&c, false, None)), vec![n1, n2, n3, n0]);
     }
 }

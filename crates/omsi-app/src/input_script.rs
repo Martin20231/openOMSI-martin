@@ -47,7 +47,7 @@ impl App {
                 log::warn!("writing the personnel file: {e}");
             }
         }
-        let bus = self.args.bus.clone().unwrap_or_default();
+        let bus = self.driven_bus_file();
         if let Err(e) = self.career.write_session(
             &self.args.map,
             &bus,

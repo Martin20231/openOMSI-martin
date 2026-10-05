@@ -387,7 +387,7 @@ impl App {
         let run = Run {
             time: 0,
             map: self.args.map.clone(),
-            bus: self.args.bus.clone().unwrap_or_default(),
+            bus: self.driven_bus_file(),
             line: self.args.line.clone(),
             seconds: k.seconds,
             metres: k.metres,
@@ -779,6 +779,20 @@ impl App {
                     self.company_run_id = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(1);
                     if let Some(c) = &self.company {
                         log::info!("company {}: balance {:.0}, {} buses", c.name, c.balance, c.buses.len());
+                    }
+                    // its buses that drive no line wait on its depot (not in another's game)
+                    if let Some(c) = self.company.clone().filter(|_| self.args.lan_join.is_none()) {
+                        let at = self.player.as_ref().map(|p| p.vehicle.position);
+                        if let Some((buses, name)) = crate::depot::park_company_buses(&self.args, &c, &w, &renderer, &mut scene, at) {
+                            if !buses.is_empty() {
+                                let n = buses.len().to_string();
+                                self.placed.extend(buses);
+                                let text = omsi_ui::tr("{n} company buses wait on the depot {name}. Get out (Ctrl+Shift+G), walk to the driver's door and press G").replace("{n}", &n).replace("{name}", &name);
+                                self.service_msg = Some((text, 12.0));
+                            }
+                        } else if !c.buses.is_empty() {
+                            self.service_msg = Some((omsi_ui::tr("No depot of your company on this map: choose it in the launcher under Company").into_owned(), 8.0));
+                        }
                     }
                 }
                 // (and a player who joins another's game sees the host's people)
