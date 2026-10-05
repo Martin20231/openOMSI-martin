@@ -322,6 +322,8 @@ pub(crate) struct App {
     /// Seconds to the next company announcement or run update, and this game's run id.
     pub(crate) company_sync_t: f32,
     pub(crate) company_run_id: u64,
+    /// The company's line for this frame's notes (made before the scene is borrowed).
+    pub(crate) company_hud: Option<String>,
     /// The duty's stops with their times as driven, kept in a file (`journey`).
     pub(crate) journey: Option<crate::journey::Journey>,
     /// How wet the roads are (0..1), built up by rain and dried by the sun.
@@ -395,6 +397,7 @@ impl App {
             cash: k.tickets.1,
             crashes: k.crashes[0],
             hurt: k.crashes[1],
+            driver: None,
         };
         let r = c.price(&run).result();
         let name = if c.short.trim().is_empty() { c.name.clone() } else { c.short.clone() };

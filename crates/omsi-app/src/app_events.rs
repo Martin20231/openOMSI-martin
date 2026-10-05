@@ -1451,6 +1451,7 @@ impl ApplicationHandler for App {
                 self.editor_reload_frame(dt);
                 // the bus company in multiplayer: the host's announcements, a friend's run
                 self.company_sync(dt);
+                self.company_hud = self.company_line();
                 // the host sends every edit of the map again now and then (players join)
                 if self.lan.as_ref().map(|l| l.role == omsi_net::Role::Host).unwrap_or(false) {
                     self.editor_sync_t -= dt;
@@ -2157,7 +2158,7 @@ impl ApplicationHandler for App {
                             lines.push(format!("Change due: {owed:.2}"));
                         }
                     }
-                    if let Some(l) = self.company_line() {
+                    if let Some(l) = self.company_hud.clone() {
                         lines.push(l);
                     }
                     let __t = Instant::now();
