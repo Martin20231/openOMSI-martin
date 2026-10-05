@@ -405,7 +405,7 @@ fn fleet(l: &mut Launcher, body: Rect) {
     let mut line_opts: Vec<String> = vec![tr("Depot")];
     line_opts.extend(c.lines.iter().map(|x| format!("{} {x}", tr("Line"))));
     let armed_sell = l.company.armed.clone();
-    let cols = [0.0f32, 0.09, 0.36, 0.56, 0.66, 0.83];
+    let cols = [0.0f32, 0.08, 0.32, 0.5, 0.58, 0.74];
     let head = ["No.", "Bus", "Condition", "km", "Line", ""];
     for (k, h) in head.iter().enumerate() {
         l.ui.text_in(h, Rect::new(inner.x + inner.w * cols[k], inner.y, 120.0, 18.0), 11.0, Weight::Bold, TEXT_FAINT, Align::Left);
@@ -424,15 +424,16 @@ fn fleet(l: &mut Launcher, body: Rect) {
             ui.p().rounded(Rect::new(x, y + 2.0, w, rh - 6.0), 8.0, Color::WHITE.alpha(0.03));
             let cy = y + 2.0 + (rh - 6.0) * 0.5 - 10.0;
             ui.text_in(&b.nr.to_string(), Rect::new(x + 8.0, cy, w * 0.09, 20.0), 13.0, Weight::Bold, TEXT, Align::Left);
-            ui.text_in(&b.name, Rect::new(x + w * cols[1], cy, w * 0.26, 20.0), 13.0, Weight::Medium, TEXT, Align::Left);
-            ui.progress(Rect::new(x + w * cols[2], cy + 6.0, w * 0.13, 8.0), (b.condition / 100.0) as f32, false);
-            ui.text_in(&format!("{:.0} %", b.condition), Rect::new(x + w * cols[2] + w * 0.14, cy, w * 0.06, 20.0), 11.5, Weight::Bold, condition_color(b.condition), Align::Left);
-            ui.text_in(&format!("{:.0}", b.km), Rect::new(x + w * cols[3], cy, w * 0.09, 20.0), 12.0, Weight::Regular, TEXT_DIM, Align::Left);
+            ui.text_in(&b.name, Rect::new(x + w * cols[1], cy, w * 0.23, 20.0), 13.0, Weight::Medium, TEXT, Align::Left);
+            ui.progress(Rect::new(x + w * cols[2], cy + 6.0, w * 0.11, 8.0), (b.condition / 100.0) as f32, false);
+            ui.text_in(&format!("{:.0} %", b.condition), Rect::new(x + w * cols[2] + w * 0.12, cy, w * 0.06, 20.0), 11.5, Weight::Bold, condition_color(b.condition), Align::Left);
+            ui.text_in(&format!("{:.0}", b.km), Rect::new(x + w * cols[3], cy, w * 0.07, 20.0), 12.0, Weight::Regular, TEXT_DIM, Align::Left);
             let mut sel = c.lines.iter().position(|x| *x == b.line).map(|i| i + 1).unwrap_or(0);
-            if ui.select(&format!("co-bus-line-{}", b.nr), Rect::new(x + w * cols[4], y + 9.0, w * 0.16, 30.0), &mut sel, &line_opts) {
+            if ui.select(&format!("co-bus-line-{}", b.nr), Rect::new(x + w * cols[4], y + 9.0, w * 0.15, 30.0), &mut sel, &line_opts) {
                 acts.push(Act::AssignBus(b.nr, if sel == 0 { String::new() } else { c.lines[sel - 1].clone() }));
             }
-            let bw = (w * 0.17 - 6.0) * 0.5;
+            // (both buttons fit their labels; the list's scroll bar keeps 10 px on the right)
+            let bw = (w * (1.0 - cols[5]) - 16.0) * 0.5;
             let bx = x + w * cols[5];
             if b.condition < 99.5 && ui.button(&format!("co-repair-{}", b.nr), Rect::new(bx, y + 9.0, bw, 30.0), "Workshop", None, ButtonKind::Normal) {
                 acts.push(Act::Repair(b.nr));
