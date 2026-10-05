@@ -50,7 +50,8 @@ pub enum Sheet {
 }
 
 /// The pages More opens.
-const MORE: [(Page, &str, &str, &str); 7] = [
+const MORE: [(Page, &str, &str, &str); 8] = [
+    (Page::Company, "Company", "garage", "Your own bus company"),
     (Page::Profile, "Profile", "badge", "Your driver, level and records"),
     (Page::Settings, "Settings", "tune", "Graphics, sound, gameplay"),
     (Page::Controls, "Controls", "sports_esports", "Touch, wheels and gamepads"),
@@ -1182,6 +1183,7 @@ fn embedded(l: &mut Launcher, page: Page, body: Rect, back: bool) {
     l.ui.push_clip(Rect::new(body.x, body.y + top, body.w, body.h - top), 0.0);
     match page {
         Page::Drive => super::drive::draw(l, content),
+        Page::Company => super::company::draw(l, content),
         Page::Multiplayer => super::multiplayer::draw(l, content),
         Page::Profile => super::pages::profile(l, content),
         Page::Settings => super::pages::settings(l, content),

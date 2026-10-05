@@ -5,8 +5,9 @@
 //! original map. New objects are made as copies of one that is there (C), and a copy
 //! takes the shape of any other object of its folder (V): each is a new `[object]` record
 //! after its model's. The ground is shaped with a brush where the view points (raised,
-//! lowered, flattened); a tile's ground is written as its `.map.terrain` copy. Splines are
-//! not part of it (the timetable is the launcher's Timetable page).
+//! lowered, flattened); a tile's ground is written as its `.map.terrain` copy. X switches
+//! to the splines - roads, rails, pavements - which `crate::spline_editor` edits and the
+//! tile copy carries too (the timetable is the launcher's Timetable page).
 //!
 //! Keys while it is on (Ctrl+Shift+E, or the game menu):
 //! Enter picks the object nearest the middle of the view, Tab the next nearest;
@@ -18,8 +19,18 @@
 //! lower the ground under the middle of the view (a quarter metre, a twentieth with
 //! Shift), F flattens it to the height at the middle, [ and ] make the brush smaller and
 //! larger.
+//!
+//! With X the keys are the spline editor's (X again: back to the objects): Enter or a click
+//! picks the spline in the middle of the view, Tab the next nearest; I / K / J / L / U / O
+//! move it, N / M turn it about its start, G / H make it shorter and longer (a metre, a
+//! tenth with Shift), R / T bend it to the left and to the right, B straightens it, Page Up
+//! / Page Down change its gradient (half a percent, a tenth with Shift); C continues the road
+//! with a new spline at its end, P joins its start to the spline before it, Shift+P pulls
+//! the splines after it onto its end, V gives it the next type of its folder, Delete takes
+//! it away (again: back), Backspace undoes all its edits, Ctrl+S saves.
 
 use crate::scene::{ObjectEdit, World};
+use crate::spline_editor::{Op, SplineEditor};
 use glam::{DVec3, Vec3};
 use hashbrown::HashMap;
 use std::path::{Path, PathBuf};
@@ -53,6 +64,71 @@ pub struct Editor {
     next: usize,
     /// The ground brush's radius (m; 0: the default).
     brush: f64,
+    /// The keys are the spline editor's (X).
+    pub spline_mode: bool,
+    pub splines: Option<SplineEditor>,
+    /// Tiles the spline editor changed that are still to be read again, and the seconds
+    /// until they are (keys held down change a spline many times a second).
+    reload: Vec<(i32, i32)>,
+    reload_wait: f32,
+    /// Each tile file saved this run as it was before the first save: a later save starts
+    /// from it again, so that the edits (which count from it) are not applied twice.
+    first_text: HashMap<(i32, i32), Vec<u8>>,
+}
+
+/// A key of the spline editor.
+pub enum SplineKey {
+    Op(Op),
+    Pick,
+    NextPick,
+    NextType,
+    Save,
+    Leave,
+    /// Back to the objects.
+    Objects,
+}
+
+/// The spline editor's key for `code` (Shift for the fine steps), as the camera faces `yaw`.
+pub fn spline_key_for(code: winit::keyboard::KeyCode, shift: bool, ctrl: bool, yaw: f64) -> Option<SplineKey> {
+    use winit::keyboard::KeyCode as K;
+    let step = if shift { 0.05 } else { 0.5 };
+    let (s, c) = yaw.to_radians().sin_cos();
+    let fwd = DVec3::new(s, c, 0.0) * step;
+    let right = DVec3::new(c, -s, 0.0) * step;
+    let turn = if shift { 0.5 } else { 5.0 };
+    let len = if shift { 0.1 } else { 1.0 };
+    // curvature steps: 1/400 m (a tenth with Shift)
+    let bend = if shift { 0.00025 } else { 0.0025 };
+    let grade = if shift { 0.1 } else { 0.5 };
+    Some(match code {
+        K::Enter | K::NumpadEnter => SplineKey::Pick,
+        K::Tab => SplineKey::NextPick,
+        K::KeyX if !ctrl => SplineKey::Objects,
+        K::KeyV if !ctrl => SplineKey::NextType,
+        K::KeyS if ctrl => SplineKey::Save,
+        K::Escape => SplineKey::Leave,
+        K::KeyI => SplineKey::Op(Op::Move(fwd)),
+        K::KeyK => SplineKey::Op(Op::Move(-fwd)),
+        K::KeyL => SplineKey::Op(Op::Move(right)),
+        K::KeyJ => SplineKey::Op(Op::Move(-right)),
+        K::KeyO => SplineKey::Op(Op::Move(DVec3::Z * step)),
+        K::KeyU => SplineKey::Op(Op::Move(-DVec3::Z * step)),
+        K::KeyM => SplineKey::Op(Op::Turn(turn)),
+        K::KeyN => SplineKey::Op(Op::Turn(-turn)),
+        K::KeyH => SplineKey::Op(Op::Length(len)),
+        K::KeyG => SplineKey::Op(Op::Length(-len)),
+        K::KeyT => SplineKey::Op(Op::Curve(bend)),
+        K::KeyR => SplineKey::Op(Op::Curve(-bend)),
+        K::KeyB => SplineKey::Op(Op::Straight),
+        K::PageUp => SplineKey::Op(Op::Grade(grade)),
+        K::PageDown => SplineKey::Op(Op::Grade(-grade)),
+        K::KeyC if !ctrl => SplineKey::Op(Op::Continue),
+        K::KeyP if shift => SplineKey::Op(Op::PullChain),
+        K::KeyP => SplineKey::Op(Op::Attach),
+        K::Delete => SplineKey::Op(Op::Delete),
+        K::Backspace => SplineKey::Op(Op::Undo),
+        _ => return None,
+    })
 }
 
 /// The ground brush's radius when none is set, and its limits (m).
@@ -75,6 +151,8 @@ pub enum Action {
     Flatten,
     /// Make the brush larger (or smaller) by this factor.
     Brush(f64),
+    /// To the spline editor.
+    Splines,
 }
 
 impl Editor {
@@ -255,6 +333,11 @@ impl Editor {
 
     /// The selected object and what has been done to it.
     pub fn describe(&self, world: &World) -> String {
+        if self.spline_mode {
+            if let Some(sp) = self.splines.as_ref() {
+                return sp.describe(&world.spline_edits.lock());
+            }
+        }
         if let Some(a) = self.editing_added.and_then(|k| self.added.get(k)) {
             let name = a.sco.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
             return if a.deleted { format!("New object {name}: taken away (Delete brings it back)") } else { format!("New object {} {name}: V for the next of its folder, C copies it again", a.id) };
@@ -331,9 +414,119 @@ impl Editor {
         (format!("{what} (brush {:.1} m, {} tile(s)) - Ctrl+S saves", r, changed.len()), changed)
     }
 
+    /// X: the keys go to the spline editor (made on first use), or back to the objects.
+    pub fn toggle_splines(&mut self, world: &World) -> String {
+        self.spline_mode = !self.spline_mode;
+        if !self.spline_mode {
+            if let Some(sp) = self.splines.as_mut() {
+                sp.marks.clear();
+            }
+            return self.describe(world);
+        }
+        if self.splines.is_none() {
+            // new splines get IDCodes no object or spline of the map has
+            let index = world.index();
+            let objects = world.object_positions.lock().keys().copied().max().unwrap_or(0);
+            let loaded = world.edit_objects.lock().keys().copied().max().unwrap_or(0);
+            let splines = index.splines.keys().copied().max().unwrap_or(0);
+            self.splines = Some(SplineEditor::new(omsi_map::tile_size(), objects.max(loaded).max(splines) + 1));
+        }
+        self.ensure_spline_bases(world);
+        self.describe(world)
+    }
+
+    /// The spline editor knows the splines of every loaded tile (as their files have them).
+    fn ensure_spline_bases(&mut self, world: &World) {
+        let Some(sp) = self.splines.as_mut() else { return };
+        let chrono = world.chrono_dirs.read().clone();
+        for (tx, ty) in world.loaded_tiles() {
+            if sp.has_base((tx, ty)) {
+                continue;
+            }
+            let Some(src) = world.tile_source(tx, ty) else { continue };
+            let list = crate::tiles::read_tile(&src, &chrono).map(|t| t.splines).unwrap_or_default();
+            sp.set_base((tx, ty), list);
+        }
+    }
+
+    /// The spline in front of the eye (along `forward`).
+    pub fn spline_pick(&mut self, world: &World, eye: DVec3, forward: Vec3) -> String {
+        self.ensure_spline_bases(world);
+        let Some(sp) = self.splines.as_mut() else { return String::new() };
+        let edits = world.spline_edits.lock();
+        if sp.pick(&edits, eye, forward.as_dvec3()).is_none() {
+            return omsi_ui::tr("No road there. Point at a road, rail or path.").into_owned();
+        }
+        sp.describe(&edits)
+    }
+
+    pub fn spline_next_pick(&mut self, world: &World) -> String {
+        let Some(sp) = self.splines.as_mut() else { return String::new() };
+        let edits = world.spline_edits.lock();
+        sp.next_pick(&edits);
+        sp.describe(&edits)
+    }
+
+    /// Change the selected spline; the tiles it changed are read again shortly.
+    pub fn spline_apply(&mut self, world: &World, op: &Op) -> String {
+        self.ensure_spline_bases(world);
+        let Some(sp) = self.splines.as_mut() else { return String::new() };
+        let result = sp.apply(&mut world.spline_edits.lock(), op);
+        match result {
+            Ok(a) => {
+                for t in a.tiles {
+                    if !self.reload.contains(&t) {
+                        self.reload.push(t);
+                    }
+                }
+                self.reload_wait = 0.15;
+                a.msg
+            }
+            Err(e) => e,
+        }
+    }
+
+    /// V: the selected spline takes the next type of its folder.
+    pub fn spline_next_type(&mut self, world: &World) -> String {
+        let Some(sp) = self.splines.as_ref() else { return String::new() };
+        let Some((tile, id)) = sp.selected else { return omsi_ui::tr("Pick a road first: point at it and press Enter").into_owned() };
+        let Some(cur) = sp.current(&world.spline_edits.lock(), tile, id) else { return String::new() };
+        let file = omsi_cfg::resolve_path(&world.root, cur.file.trim());
+        let Some(dir) = file.parent() else { return String::new() };
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .map(|d| d.flatten().filter_map(|e| e.file_name().to_str().map(|s| s.to_string())).filter(|n| n.to_ascii_lowercase().ends_with(".sli")).collect())
+            .unwrap_or_default();
+        names.sort_by_key(|n| n.to_ascii_lowercase());
+        match crate::spline_editor::next_type(cur.file.trim(), &names) {
+            Some(f) => self.spline_apply(world, &Op::SetFile(f)),
+            None => omsi_ui::tr("No other road types in this folder").into_owned(),
+        }
+    }
+
+    /// The points drawn over the selected spline, while the spline keys are on.
+    pub fn spline_marks(&self) -> &[(DVec3, [f32; 3])] {
+        match self.splines.as_ref() {
+            Some(sp) if self.spline_mode => sp.marks.as_slice(),
+            _ => &[],
+        }
+    }
+
+    /// The tiles to read again now (some time after the last change, and none of them
+    /// still on its way: a tile read before the last change would show the old roads).
+    pub fn due_reload(&mut self, dt: f32, busy: impl Fn((i32, i32)) -> bool) -> Vec<(i32, i32)> {
+        if self.reload.is_empty() {
+            return Vec::new();
+        }
+        self.reload_wait -= dt;
+        if self.reload_wait > 0.0 || self.reload.iter().any(|t| busy(*t)) {
+            return Vec::new();
+        }
+        std::mem::take(&mut self.reload)
+    }
+
     /// Write every tile with edits as a copy under `content` (the map's own folder there),
     /// from the file the game reads it from. Returns the files written.
-    pub fn save(&self, world: &World, map_rel: &str, content: &Path, original: &Path) -> Result<Vec<PathBuf>, String> {
+    pub fn save(&mut self, world: &World, map_rel: &str, content: &Path, original: &Path) -> Result<Vec<PathBuf>, String> {
         let edits = world.object_edits.lock().clone();
         let mut by_tile: HashMap<(i32, i32), HashMap<i64, ObjectEdit>> = HashMap::new();
         for (id, e) in edits {
@@ -347,6 +540,12 @@ impl Editor {
             copies_by_tile.entry(a.tile).or_default().push(NewRecord { template: a.template, id: a.id, file, moved: offset, turned: a.base_heading + a.turned - template_heading(world, a.template).unwrap_or(a.base_heading) });
             by_tile.entry(a.tile).or_default();
         }
+        let splines = world.spline_edits.lock().clone();
+        for (t, e) in &splines {
+            if !e.is_empty() {
+                by_tile.entry(*t).or_default();
+            }
+        }
         let map_dir = Path::new(map_rel).parent().unwrap_or(Path::new(""));
         let mut written = Vec::new();
         for ((tx, ty), edits) in by_tile {
@@ -359,14 +558,32 @@ impl Editor {
                     return Err(format!("{} lies in the original installation: not written", out.display()));
                 }
             }
-            let bytes = omsi_cfg::vfs::read(&src).map_err(|e| format!("{}: {e}", src.display()))?;
+            // (the tile as it was before this run's first save: the edits count from it)
+            let bytes = match self.first_text.get(&(tx, ty)) {
+                Some(b) => b.clone(),
+                None => omsi_cfg::vfs::read(&src).map_err(|e| format!("{}: {e}", src.display()))?,
+            };
             let (text, enc) = decode(&bytes);
             let (new_text, n) = rewrite_tile(&text, &edits);
-            let (new_text, c) = add_copies(&new_text, copies_by_tile.get(&(tx, ty)).map(|v| v.as_slice()).unwrap_or(&[]));
-            let n = n + c;
+            let (mut new_text, c) = add_copies(&new_text, copies_by_tile.get(&(tx, ty)).map(|v| v.as_slice()).unwrap_or(&[]));
+            let mut n = n + c;
+            if let Some(e) = splines.get(&(tx, ty)).filter(|e| !e.is_empty()) {
+                let r = omsi_map::tile_write::save_splines(&new_text, &e.changed, &e.added, omsi_map::world_tile_scale(ty)).map_err(|err| format!("tile ({tx}, {ty}): {err}"))?;
+                if !r.unmatched.is_empty() {
+                    log::warn!("spline editor: splines {:?} of tile ({tx}, {ty}) are not in {} (a chrono patch's own): not saved", r.unmatched, src.display());
+                }
+                log::info!("spline editor: tile ({tx}, {ty}): {} splines changed, {} deleted, {} new", r.changed, r.deleted, r.added);
+                n += r.changed + r.deleted + r.added;
+                new_text = r.text;
+            }
             if n == 0 {
+                // (splines edited back to what the file has: nothing to write)
+                if edits.is_empty() && !copies_by_tile.contains_key(&(tx, ty)) {
+                    continue;
+                }
                 return Err(format!("the objects edited were not found in {}", src.display()));
             }
+            self.first_text.entry((tx, ty)).or_insert(bytes);
             std::fs::create_dir_all(out.parent().unwrap_or(Path::new("."))).map_err(|e| e.to_string())?;
             let data = encode(&new_text, enc);
             std::fs::write(&out, data).map_err(|e| format!("{}: {e}", out.display()))?;
@@ -602,6 +819,7 @@ pub fn action_for(code: winit::keyboard::KeyCode, shift: bool, ctrl: bool, yaw: 
         K::Enter | K::NumpadEnter => Action::Pick,
         K::KeyC if !ctrl => Action::Copy,
         K::KeyV if !ctrl => Action::Variant,
+        K::KeyX if !ctrl => Action::Splines,
         K::Tab => Action::NextPick,
         K::KeyI => Action::Move(fwd),
         K::KeyK => Action::Move(-fwd),

@@ -2045,6 +2045,9 @@ pub struct World {
     pub object_edits: Mutex<HashMap<i64, ObjectEdit>>,
     /// The ground as the editor's brush has left it, by tile (read instead of the file).
     pub terrain_edits: Mutex<HashMap<(i32, i32), Terrain>>,
+    /// What the spline editor changed, by tile: a tile is read with these records in place
+    /// of its own (`crate::spline_editor`), kept over tile reloads until the end of the run.
+    pub spline_edits: Mutex<crate::spline_editor::Edits>,
     /// Placed `[busstop]` objects: (map id, world position, heading, name).
     pub bus_stops: Mutex<Vec<(i64, DVec3, f64, String)>>,
     /// Where people wait at the stops: the `[passpos]` points of placed objects with a
@@ -2919,6 +2922,7 @@ impl World {
             edit_objects: Mutex::new(HashMap::new()),
             object_edits: Mutex::new(HashMap::new()),
             terrain_edits: Mutex::new(HashMap::new()),
+            spline_edits: Mutex::new(Default::default()),
             bus_stops: Mutex::new(Vec::new()),
             waiting_places: Mutex::new(Vec::new()),
             waiting_cabins: Mutex::new(HashMap::new()),
@@ -3953,7 +3957,11 @@ impl World {
     fn stage_tile(&self, tx: i32, ty: i32, path: &Path, index: &MapIndex) -> StagedTile {
         let origin2 = DVec2::new(tx as f64 * tile_size(), ty as f64 * tile_size());
         let origin = DVec3::new(origin2.x, origin2.y, 0.0);
-        let tile = crate::tiles::read_tile(path, &self.chrono_dirs.read());
+        let mut tile = crate::tiles::read_tile(path, &self.chrono_dirs.read());
+        // the spline editor's records in place of the file's
+        if let (Some(t), Some(e)) = (tile.as_mut(), self.spline_edits.lock().get(&(tx, ty))) {
+            e.apply(&mut t.splines);
+        }
         // (an active chrono patch may bring the tile's terrain: see `Tile::terrain_from`)
         let terrain_path = match &tile {
             Some(t) => crate::tiles::terrain_file(t, path),

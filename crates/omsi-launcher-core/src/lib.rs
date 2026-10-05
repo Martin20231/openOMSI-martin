@@ -7,6 +7,7 @@
 //! `install` runs mod installs as background jobs, `index` caches the content lists and
 //! tells the page when they changed, `instances` keeps track of the games started.
 
+pub mod company;
 pub mod index;
 pub mod install;
 pub mod instances;
@@ -1478,6 +1479,26 @@ fn sessions() -> Vec<Session> {
     let mut out: Vec<Session> = std::fs::read_dir(&dir).map(|rd| rd.flatten().filter_map(|e| std::fs::read_to_string(e.path()).ok()).filter_map(|t| serde_json::from_str::<Session>(&t).ok()).collect()).unwrap_or_default();
     out.sort_by(|a, b| b.time.cmp(&a.time));
     out
+}
+
+/// The bus company's file (see [`company`]).
+pub fn company_path() -> PathBuf {
+    data_dir().join("company.cfg")
+}
+
+/// The company's values file (prices, wear, wages; see [`company::Tuning`]).
+pub fn company_values_path() -> PathBuf {
+    data_dir().join("company-values.cfg")
+}
+
+/// Every run the game wrote, as the company books them, oldest first.
+pub fn company_runs() -> Vec<company::Run> {
+    let mut v: Vec<company::Run> = sessions()
+        .into_iter()
+        .map(|s| company::Run { time: s.time, map: s.map, bus: s.bus, line: s.line, seconds: s.seconds, metres: s.metres, stops: s.stops, early: s.early, late: s.late, cash: s.cash, crashes: s.crashes, hurt: s.hurt })
+        .collect();
+    v.reverse();
+    v
 }
 
 /// Experience: a point per hundred metres, five per stop served on time, two per ticket,

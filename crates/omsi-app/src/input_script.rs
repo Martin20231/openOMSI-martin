@@ -2534,6 +2534,9 @@ impl App {
             self.service_msg = Some(("In a LAN session only the host edits the map".into(), 3.0));
             return;
         }
+        if self.editor.is_some() {
+            self.editor_reload_frame(f32::MAX);
+        }
         if self.editor.take().is_some() {
             self.editor_drag = false;
             self.service_msg = Some(("Object editor off (unsaved changes stay until the end of the session)".into(), 3.0));
@@ -2542,7 +2545,7 @@ impl App {
         let ed = crate::editor::Editor::default();
         let msg = self.world.as_ref().map(|w| ed.describe(w)).unwrap_or_default();
         self.editor = Some(ed);
-        self.service_msg = Some((format!("{msg} - click picks, drag moves, wheel turns (Shift: height), Delete, C copy, V variant, Backspace undo, PgUp/PgDn/F ground, [ ] brush, Ctrl+S save, Esc leave"), 10.0));
+        self.service_msg = Some((format!("{msg} - click picks, drag moves, wheel turns (Shift: height), Delete, C copy, V variant, Backspace undo, PgUp/PgDn/F ground, [ ] brush, X splines, Ctrl+S save, Esc leave"), 10.0));
     }
 
     /// A key while the object editor is on; true when it was the editor's.
@@ -2551,6 +2554,9 @@ impl App {
         let ctrl = self.keys.contains(&KeyCode::ControlLeft) || self.keys.contains(&KeyCode::ControlRight);
         let Some(cam) = self.camera.as_ref() else { return false };
         let (eye, fwd, yaw) = (cam.position, cam.forward(), cam.yaw as f64);
+        if self.editor.as_ref().is_some_and(|e| e.spline_mode) {
+            return self.spline_editor_key(code, shift, ctrl, eye, fwd, yaw);
+        }
         let Some(action) = crate::editor::action_for(code, shift, ctrl, yaw) else { return false };
         let Some(world) = self.world.clone() else { return false };
         let msg = match action {
@@ -2568,16 +2574,8 @@ impl App {
                 ed.next_pick();
                 ed.describe(&world)
             }
-            crate::editor::Action::Save => {
-                let content = crate::startup::content_dir();
-                let ed = self.editor.as_ref().unwrap();
-                match content.map(|c| ed.save(&world, &self.args.map, &c, &self.args.root)) {
-                    Some(Ok(files)) if files.is_empty() => "Nothing to save".to_string(),
-                    Some(Ok(files)) => format!("Saved {} tile(s) to the content folder ({})", files.len(), files.iter().filter_map(|f| f.file_name()).map(|n| n.to_string_lossy()).collect::<Vec<_>>().join(", ")),
-                    Some(Err(e)) => format!("Not saved: {e}"),
-                    None => "Not saved: no content folder".to_string(),
-                }
-            }
+            crate::editor::Action::Save => self.editor_save(&world),
+            crate::editor::Action::Splines => self.editor.as_mut().unwrap().toggle_splines(&world),
             a @ (crate::editor::Action::Ground(_) | crate::editor::Action::Flatten | crate::editor::Action::Brush(_)) => {
                 let at = crate::editor::Editor::aim(&world, eye, fwd);
                 let (msg, tiles) = self.editor.as_mut().unwrap().ground(&world, at, &a);
@@ -2602,6 +2600,69 @@ impl App {
         self.service_msg = Some((msg, 5.0));
         self.editor_broadcast(false);
         true
+    }
+
+    /// Ctrl+S in the editor: the changed tiles (objects, splines, ground) into the content
+    /// folder.
+    fn editor_save(&mut self, world: &crate::scene::World) -> String {
+        let content = crate::startup::content_dir();
+        let (map, root) = (self.args.map.clone(), self.args.root.clone());
+        let Some(ed) = self.editor.as_mut() else { return String::new() };
+        match content.map(|c| ed.save(world, &map, &c, &root)) {
+            Some(Ok(files)) if files.is_empty() => "Nothing to save".to_string(),
+            Some(Ok(files)) => format!("Saved {} tile(s) to the content folder ({})", files.len(), files.iter().filter_map(|f| f.file_name()).map(|n| n.to_string_lossy()).collect::<Vec<_>>().join(", ")),
+            Some(Err(e)) => format!("Not saved: {e}"),
+            None => "Not saved: no content folder".to_string(),
+        }
+    }
+
+    /// A key while the spline editor has the keys (X in the object editor).
+    fn spline_editor_key(&mut self, code: KeyCode, shift: bool, ctrl: bool, eye: glam::DVec3, fwd: glam::Vec3, yaw: f64) -> bool {
+        use crate::editor::SplineKey;
+        let Some(key) = crate::editor::spline_key_for(code, shift, ctrl, yaw) else { return false };
+        let Some(world) = self.world.clone() else { return false };
+        let msg = match key {
+            SplineKey::Leave => {
+                self.toggle_editor();
+                return true;
+            }
+            SplineKey::Save => self.editor_save(&world),
+            key => {
+                let ed = self.editor.as_mut().unwrap();
+                match key {
+                    SplineKey::Objects => ed.toggle_splines(&world),
+                    SplineKey::Pick => ed.spline_pick(&world, eye, fwd),
+                    SplineKey::NextPick => ed.spline_next_pick(&world),
+                    SplineKey::NextType => ed.spline_next_type(&world),
+                    SplineKey::Op(op) => ed.spline_apply(&world, &op),
+                    SplineKey::Leave | SplineKey::Save => unreachable!(),
+                }
+            }
+        };
+        log::info!("spline editor: {msg}");
+        self.service_msg = Some((msg, 5.0));
+        true
+    }
+
+    /// Every frame while the editor is on: the tiles the spline editor changed are read
+    /// again once the keys rest (`dt` = f32::MAX: now, whatever is on its way).
+    pub(crate) fn editor_reload_frame(&mut self, dt: f32) {
+        let Some(ed) = self.editor.as_mut() else { return };
+        let now = dt == f32::MAX;
+        let tiles = {
+            let st = self.streamer.as_ref();
+            ed.due_reload(dt, |k| !now && st.is_some_and(|s| s.in_flight(k)))
+        };
+        if tiles.is_empty() {
+            return;
+        }
+        log::info!("spline editor: tiles {tiles:?} read again");
+        if let Some(w) = self.world.as_ref() {
+            w.forget_staged(&tiles);
+        }
+        if let (Some(st), Some(r), Some(scene)) = (self.streamer.as_mut(), self.renderer.as_ref(), self.scene.as_mut()) {
+            st.reload(r, scene, Some(&tiles), self.audio.as_ref());
+        }
     }
 
     /// The host's edits to the other players' games (`all`: every edit of the session,
@@ -2657,6 +2718,11 @@ impl App {
         let (Some(cam), Some(s), Some(world)) = (self.camera.as_ref(), self.surface.as_ref(), self.world.clone()) else { return true };
         let (o, d) = self.world_cursor_ray(cam, (s.config.width, s.config.height));
         let ed = self.editor.as_mut().unwrap();
+        if ed.spline_mode {
+            let msg = ed.spline_pick(&world, o, d);
+            self.service_msg = Some((msg, 5.0));
+            return true;
+        }
         // (the copy being edited stays the one dragged while it is under the cursor)
         let on_added = ed.editing_added.and_then(|k| ed.added.get(k)).map(|a| {
             let p = a.base + a.moved - o;
@@ -2692,6 +2758,14 @@ impl App {
             return false;
         }
         let shift = self.keys.contains(&KeyCode::ShiftLeft) || self.keys.contains(&KeyCode::ShiftRight);
+        if self.editor.as_ref().is_some_and(|e| e.spline_mode) {
+            use crate::spline_editor::Op;
+            let op = if shift { Op::Move(glam::DVec3::Z * 0.1 * amount as f64) } else { Op::Turn(5.0 * amount as f64) };
+            let Some(world) = self.world.clone() else { return true };
+            let msg = self.editor.as_mut().unwrap().spline_apply(&world, &op);
+            self.service_msg = Some((msg, 3.0));
+            return true;
+        }
         let action = if shift { crate::editor::Action::Move(glam::DVec3::Z * 0.1 * amount as f64) } else { crate::editor::Action::Turn(5.0 * amount as f64) };
         let (Some(world), Some(r), Some(scene)) = (self.world.clone(), self.renderer.as_ref(), self.scene.as_mut()) else { return true };
         if let Some(m) = self.editor.as_mut().unwrap().apply(&world, r, scene, &action) {

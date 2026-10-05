@@ -34,6 +34,7 @@ mod camera_arm;
 mod career;
 mod describe;
 mod editor;
+mod spline_editor;
 mod game_lists;
 mod rail_drive;
 mod driver;

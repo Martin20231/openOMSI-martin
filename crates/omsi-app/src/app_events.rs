@@ -1447,6 +1447,8 @@ impl ApplicationHandler for App {
                     crate::admin::guard_fall(self, dt);
                 }
                 self.placing_frame();
+                // the tiles the spline editor changed, read again once the keys rest
+                self.editor_reload_frame(dt);
                 // the host sends every edit of the map again now and then (players join)
                 if self.lan.as_ref().map(|l| l.role == omsi_net::Role::Host).unwrap_or(false) {
                     self.editor_sync_t -= dt;
@@ -1899,8 +1901,20 @@ impl ApplicationHandler for App {
                     let __tc = Instant::now();
                     lights::collect(w, scene, &daylight, cam.position, &vehicles);
                     *self.profile.entry("lights.collect").or_default() += __tc.elapsed().as_secs_f64();
+                    // the spline editor's pick: points along it (its start green, its end red)
+                    if let Some(ed) = self.editor.as_ref() {
+                        for (p, c) in ed.spline_marks() {
+                            scene.coronas.push(omsi_render::Corona {
+                                position: *p,
+                                size: 0.35,
+                                color: *c,
+                                brightness: 2.0,
+                                ..Default::default()
+                            });
+                        }
+                    }
                     // the object editor's pick: a magenta glow over it
-                    if let Some(id) = self.editor.as_ref().and_then(|e| e.selected) {
+                    if let Some(id) = self.editor.as_ref().filter(|e| !e.spline_mode).and_then(|e| e.selected) {
                         let at = w.edit_objects.lock().get(&id).map(|o| o.pos);
                         let moved = w.object_edits.lock().get(&id).map(|e| e.moved).unwrap_or_default();
                         if let Some(p) = at {
@@ -2089,8 +2103,13 @@ impl ApplicationHandler for App {
                     // the object editor's keys, while it is on (one quiet line)
                     // the mirror editor's keys and the panel under the cursor, while it is on
                     lines.extend(mirror_help);
-                    if self.editor.is_some() {
-                        lines.push("Object editor: click picks · drag moves · wheel turns (Shift lifts) · Del · C copy · V variant · Backspace undo · Ctrl+S save · Esc".into());
+                    if let Some(ed) = self.editor.as_ref() {
+                        if ed.spline_mode {
+                            lines.push("Spline editor: click picks · IJKL/UO move · N/M turn · G/H shorter/longer · R/T curve · B straight · PgUp/PgDn slope · C add piece · P connect · Shift+P pull along · V type · Del · Backspace undo · Ctrl+S save · X objects · Esc".into());
+                        } else {
+                            lines.push("Object editor: click picks · drag moves · wheel turns (Shift lifts) · Del · C copy · V variant · Backspace undo · Ctrl+S save · Esc".into());
+                            lines.push("X: spline editor (roads)".into());
+                        }
                     }
                     if let Some(d) = self.duty.as_ref().filter(|d| d.trip_done()) {
                         lines.push(match d.trips.get(d.trip_index + 1) {

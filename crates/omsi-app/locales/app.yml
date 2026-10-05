@@ -23328,3 +23328,429 @@ _version: 2
 
 "A right click ends the mouse steering":
   zh-tw: "按一下滑鼠右鍵即可停止滑鼠轉向"
+
+"Spline editor: point at a road and press Enter (or click)":
+  de: "Straßen-Editor: auf eine Straße zeigen und Enter drücken (oder klicken)"
+
+"Pick a road first: point at it and press Enter":
+  de: "Zuerst eine Straße wählen: draufzeigen und Enter drücken"
+
+"No road there. Point at a road, rail or path.":
+  de: "Dort ist keine Straße. Auf eine Straße, Schiene oder einen Weg zeigen."
+
+"The road piece is gone":
+  de: "Das Straßenstück ist weg"
+
+"Road piece":
+  de: "Straßenstück"
+
+"straight":
+  de: "gerade"
+
+"curve right":
+  de: "Kurve rechts"
+
+"curve left":
+  de: "Kurve links"
+
+"slope":
+  de: "Steigung"
+
+"changed":
+  de: "geändert"
+
+"new":
+  de: "neu"
+
+"deleted (Delete brings it back)":
+  de: "gelöscht (Entf holt es zurück)"
+
+"New piece added - it is selected now":
+  de: "Neues Stück angehängt – es ist jetzt ausgewählt"
+
+"New piece removed":
+  de: "Neues Stück entfernt"
+
+"Undone: back as in the map":
+  de: "Rückgängig: wieder wie in der Karte"
+
+"pieces pulled along":
+  de: "Stücke nachgezogen"
+
+"Nothing after it to pull along":
+  de: "Dahinter ist nichts zum Nachziehen"
+
+"This piece is deleted (Delete brings it back)":
+  de: "Dieses Stück ist gelöscht (Entf holt es zurück)"
+
+"No road end within 15 m to connect to":
+  de: "Kein Straßenende in 15 m Nähe zum Anschließen"
+
+"The piece before already goes on somewhere else":
+  de: "Das Stück davor geht schon woanders weiter"
+
+"No other road types in this folder":
+  de: "Keine anderen Straßentypen in diesem Ordner"
+
+"X: spline editor (roads)":
+  de: "X: Straßen-Editor"
+
+"Spline editor: click picks · IJKL/UO move · N/M turn · G/H shorter/longer · R/T curve · B straight · PgUp/PgDn slope · C add piece · P connect · Shift+P pull along · V type · Del · Backspace undo · Ctrl+S save · X objects · Esc":
+  de: "Straßen-Editor: Klick wählt · IJKL/UO verschieben · N/M drehen · G/H kürzer/länger · R/T Kurve · B gerade · Bild↑/↓ Steigung · C Stück anhängen · P anschließen · Umschalt+P nachziehen · V Typ · Entf löschen · Rücktaste zurück · Strg+S speichern · X Objekte · Esc"
+
+"Company":
+  de: "Unternehmen"
+
+"Found a company":
+  de: "Unternehmen gründen"
+
+"Your own bus company: buy buses, take over lines, hire drivers - and earn the money with every duty you drive.":
+  de: "Dein eigenes Busunternehmen: Busse kaufen, Linien übernehmen, Fahrer einstellen – und mit jeder Fahrt Geld verdienen."
+
+"1 · Your company":
+  de: "1 · Deine Firma"
+
+"2 · Difficulty":
+  de: "2 · Schwierigkeit"
+
+"3 · Multiplayer":
+  de: "3 · Mehrspieler"
+
+"Short name (on buses and tickets)":
+  de: "Kürzel (auf Bussen und Fahrkarten)"
+
+"Home map":
+  de: "Heimat-Karte"
+
+"Company colour":
+  de: "Firmenfarbe"
+
+"No maps found (Setup)":
+  de: "Keine Karten gefunden (Einrichtung)"
+
+"Much money to start, cheap diesel, passengers forgive a late bus.":
+  de: "Viel Startgeld, billiger Diesel, Fahrgäste verzeihen Verspätungen."
+
+"Balanced: punctuality and the state of the buses count.":
+  de: "Ausgewogen: Pünktlichkeit und Zustand der Busse zählen."
+
+"Little money, dear diesel, high fines.":
+  de: "Wenig Geld, teurer Diesel, hohe Strafen."
+
+"Easy":
+  de: "Leicht"
+
+"Hard":
+  de: "Schwer"
+
+"Share the company with friends (comes with the next update)":
+  de: "Firma mit Freunden teilen (kommt mit dem nächsten Update)"
+
+"Preview":
+  de: "Vorschau"
+
+"Your company":
+  de: "Deine Firma"
+
+"Starting capital":
+  de: "Startkapital"
+
+"Difficulty":
+  de: "Schwierigkeit"
+
+"Free lines on the map":
+  de: "Freie Linien auf der Karte"
+
+"all":
+  de: "alle"
+
+"Found the company":
+  de: "Unternehmen gründen"
+
+"Give the company a name first":
+  de: "Gib der Firma zuerst einen Namen"
+
+"Company founded":
+  de: "Unternehmen gegründet"
+
+"home map":
+  de: "Heimat-Karte"
+
+"Overview":
+  de: "Übersicht"
+
+"Fleet":
+  de: "Flotte"
+
+"Staff":
+  de: "Personal"
+
+"Finances":
+  de: "Finanzen"
+
+"Balance":
+  de: "Kontostand"
+
+"Day":
+  de: "Tag"
+
+"Income (7 days)":
+  de: "Einnahmen (7 Tage)"
+
+"Costs (7 days)":
+  de: "Ausgaben (7 Tage)"
+
+"Tickets, bonus, subsidy":
+  de: "Fahrkarten, Bonus, Zuschuss"
+
+"Diesel, wages, workshop":
+  de: "Diesel, Löhne, Werkstatt"
+
+"Punctuality":
+  de: "Pünktlichkeit"
+
+"Income and costs (last 8 weeks)":
+  de: "Einnahmen und Ausgaben (letzte 8 Wochen)"
+
+"Wk":
+  de: "Wo."
+
+"Your last trips":
+  de: "Deine letzten Fahrten"
+
+"No trips yet. Drive a duty on the company's map and it is booked here.":
+  de: "Noch keine Fahrten. Fahr einen Dienst auf der Karte deiner Firma, dann wird er hier verbucht."
+
+"Notices":
+  de: "Meldungen"
+
+"All is well.":
+  de: "Alles in Ordnung."
+
+"Drive a duty for the company":
+  de: "Dienst für die Firma fahren"
+
+"Your buses":
+  de: "Deine Busse"
+
+"No.":
+  de: "Nr."
+
+"Condition":
+  de: "Zustand"
+
+"km":
+  de: "km"
+
+"No buses yet: buy your first one on the right.":
+  de: "Noch keine Busse: Kauf rechts deinen ersten."
+
+"Workshop":
+  de: "Werkstatt"
+
+"Sure?":
+  de: "Sicher?"
+
+"Sell":
+  de: "Verkaufen"
+
+"Buy a bus":
+  de: "Bus kaufen"
+
+"Search buses":
+  de: "Busse suchen"
+
+"No buses found.":
+  de: "Keine Busse gefunden."
+
+"mod":
+  de: "Mod"
+
+"Buy":
+  de: "Kaufen"
+
+"Lines of the home map":
+  de: "Linien der Heimat-Karte"
+
+"Tours":
+  de: "Umläufe"
+
+"Buses":
+  de: "Busse"
+
+"This map has no timetable lines.":
+  de: "Diese Karte hat keine Fahrplan-Linien."
+
+"Give back":
+  de: "Abgeben"
+
+"Take over":
+  de: "Übernehmen"
+
+"Your drivers":
+  de: "Deine Fahrer"
+
+"No line":
+  de: "Keine Linie"
+
+"You":
+  de: "Du"
+
+"Boss · drives any line":
+  de: "Chef · fährt jede Linie"
+
+"No drivers hired yet: hire one on the right and give them a line with a bus.":
+  de: "Noch keine Fahrer: Stell rechts einen ein und gib ihm eine Linie mit Bus."
+
+"a month":
+  de: "im Monat"
+
+"Skill":
+  de: "Können"
+
+"Dismiss":
+  de: "Entlassen"
+
+"Applicants":
+  de: "Bewerber"
+
+"Beginner":
+  de: "Anfänger"
+
+"Experienced":
+  de: "Erfahren"
+
+"Professional":
+  de: "Profi"
+
+"Hire":
+  de: "Einstellen"
+
+"Other applicants":
+  de: "Andere Bewerber"
+
+"Friends":
+  de: "Freunde"
+
+"Soon friends will drive for your company in multiplayer and share its account. This comes with the next update.":
+  de: "Bald fahren Freunde im Mehrspieler für deine Firma und teilen das Konto. Das kommt mit dem nächsten Update."
+
+"Income (30 days)":
+  de: "Einnahmen (30 Tage)"
+
+"Costs (30 days)":
+  de: "Ausgaben (30 Tage)"
+
+"Result (30 days)":
+  de: "Ergebnis (30 Tage)"
+
+"Total":
+  de: "Summe"
+
+"Buses bought":
+  de: "Busse gekauft"
+
+"Buses sold":
+  de: "Busse verkauft"
+
+"Close the company":
+  de: "Unternehmen auflösen"
+
+"Click again: the company is gone for good":
+  de: "Nochmal klicken: die Firma ist dann endgültig weg"
+
+"Company closed":
+  de: "Unternehmen aufgelöst"
+
+"Bookings":
+  de: "Buchungen"
+
+"Runs booked for your company":
+  de: "Fahrten für deine Firma verbucht"
+
+"The company could not be saved":
+  de: "Die Firma konnte nicht gespeichert werden"
+
+"Bought":
+  de: "Gekauft"
+
+"fleet number":
+  de: "Wagennummer"
+
+"Sold bus":
+  de: "Bus verkauft"
+
+"Workshop for bus":
+  de: "Werkstatt für Bus"
+
+"Line taken over:":
+  de: "Linie übernommen:"
+
+"Line given back:":
+  de: "Linie abgegeben:"
+
+"Hired":
+  de: "Eingestellt"
+
+"Driver dismissed":
+  de: "Fahrer entlassen"
+
+"Tickets":
+  de: "Fahrkarten"
+
+"Punctuality bonus":
+  de: "Pünktlichkeitsbonus"
+
+"City subsidy":
+  de: "Zuschuss der Stadt"
+
+"Tickets of hired drivers":
+  de: "Fahrkarten der KI-Fahrer"
+
+"Diesel":
+  de: "Diesel"
+
+"Wages":
+  de: "Löhne"
+
+"Depot rent":
+  de: "Depotmiete"
+
+"Fines (crashes)":
+  de: "Strafen (Unfälle)"
+
+"Hired buses":
+  de: "Leihbusse"
+
+"The account is in the red ({}): sell a bus or drive more":
+  de: "Das Konto ist im Minus ({}): Verkauf einen Bus oder fahr mehr"
+
+"Bus {} needs the workshop":
+  de: "Bus {} muss in die Werkstatt"
+
+"Line {} has no bus: put one on it in Fleet":
+  de: "Linie {} hat keinen Bus: Setz unter Flotte einen ein"
+
+"{} driver(s) without a line: give them one in Staff":
+  de: "{} Fahrer ohne Linie: Gib ihnen unter Personal eine"
+
+"Buy your first bus in Fleet":
+  de: "Kauf unter Flotte deinen ersten Bus"
+
+"{} lines of the map are free: take one over in Lines":
+  de: "{} Linien der Karte sind frei: Übernimm eine unter Linien"
+
+"Not enough money for this bus":
+  de: "Nicht genug Geld für diesen Bus"
+
+"Not enough money for the workshop":
+  de: "Nicht genug Geld für die Werkstatt"
+
+"No such bus":
+  de: "Diesen Bus gibt es nicht"
+
+"Edit the values (prices, diesel, wages)":
+  de: "Werte bearbeiten (Preise, Diesel, Löhne)"
+
+"Change a number, save, then open this page again":
+  de: "Zahl ändern, speichern, dann diese Seite neu öffnen"

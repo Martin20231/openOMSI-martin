@@ -962,6 +962,11 @@ impl Streamer {
         log::info!("tile streaming: {} tiles to be read again", keys.len());
     }
 
+    /// Tile `k` is on its way (being read or waiting for its upload).
+    pub fn in_flight(&self, k: (i32, i32)) -> bool {
+        self.requested.contains(&k)
+    }
+
     /// (uploaded, total) of the first area while it is still loading.
     pub fn initial_progress(&self) -> Option<(usize, usize)> {
         self.initial.as_ref().filter(|(set, done)| *done < set.len()).map(|(set, done)| (*done, set.len()))

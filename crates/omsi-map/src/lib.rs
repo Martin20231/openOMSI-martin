@@ -7,6 +7,7 @@ pub mod calendar;
 pub mod global;
 pub mod terrain;
 pub mod tile;
+pub mod tile_write;
 
 pub use ailists::{active_chrono_dirs, chrono_deactivated_lines, date_code, typgroup_entry_valid, AiGroup, AiLists, DepotEntry};
 pub use calendar::{Calendar, Holiday, HolidayRange, TimeZone};

@@ -8,6 +8,7 @@
 //! lists, timetables, profiles, installs, running games) is `omsi-launcher-core`, the same
 //! functions `omsi-launcher --cli` offers a terminal.
 
+mod company;
 pub(crate) mod drive;
 pub(crate) mod mapview;
 pub mod mobile;
@@ -41,6 +42,7 @@ use winit::window::{Window, WindowId};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Page {
     Drive,
+    Company,
     Multiplayer,
     Profile,
     Settings,
@@ -52,8 +54,9 @@ pub enum Page {
     Setup,
 }
 
-const PAGES: [(Page, &str, &str); 10] = [
+const PAGES: [(Page, &str, &str); 11] = [
     (Page::Drive, "Drive", "directions_bus"),
+    (Page::Company, "Company", "garage"),
     (Page::Multiplayer, "Multiplayer", "groups"),
     (Page::Profile, "Profile", "badge"),
     (Page::Settings, "Settings", "tune"),
@@ -108,6 +111,8 @@ pub struct Launcher {
     /// The launcher made for a phone (see `phone`).
     pub phone: phone::PhoneView,
     pub pages: pages::PagesView,
+    /// The bus company (see `company`).
+    pub company: company::CompanyView,
     pub mp: multiplayer::MultiplayerView,
     /// Server icons in the interface pipeline (by server address), and those decoded but
     /// not yet uploaded.
@@ -187,6 +192,7 @@ impl Launcher {
         drive: drive::DriveView::default(),
         phone: phone::PhoneView::default(),
         pages: pages::PagesView::default(),
+        company: company::CompanyView::default(),
         mp: multiplayer::MultiplayerView::default(),
         icons: Default::default(),
         icons_pending: Vec::new(),
@@ -1062,6 +1068,7 @@ impl Launcher {
         let content = Rect::new(content.x + 8.0 * (1.0 - e), content.y, content.w, content.h);
         match self.page {
             Page::Drive => drive::draw(self, content),
+            Page::Company => company::draw(self, content),
             Page::Multiplayer => multiplayer::draw(self, content),
             Page::Profile => pages::profile(self, content),
             Page::Settings => pages::settings(self, content),
@@ -1224,6 +1231,7 @@ impl Launcher {
             };
             match p {
                 Page::Profile => self.state.load_profile(),
+                Page::Company => self.company.refresh(&mut self.state),
                 Page::Mods => self.state.load_mods(),
                 Page::Sessions => self.state.poll_now(),
                 _ => {}

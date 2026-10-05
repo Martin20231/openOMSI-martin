@@ -540,9 +540,40 @@ metre and five degrees a press, a tenth with Shift); **Delete** deletes it (agai
 **Backspace** undoes everything done to it, **Ctrl+S** saves and **Esc** leaves the editor.
 Saving writes each changed tile as a copy into the content folder's map folder
 (`<content>/maps/<map>/tile_x_y.map`), which the game reads before the installation - the
-original map is never written; delete the copy to have the original back. Only a tile's own
-`[object]` records can be edited: splines, the ground, spline rows, new objects and the
-timetable are not part of it.
+original map is never written; delete the copy to have the original back. **C** copies the
+object picked, **V** gives a copy the next object of its folder, **Page Up/Down** raise and
+lower the ground under the view and **F** flattens it (**[** and **]** size the brush). Spline
+rows and the timetable are not part of it (the timetable is the launcher's Timetable page).
+
+### Splines
+
+**X** in the object editor switches its keys to the map's splines - roads, rails, pavements,
+wires (X again: back to the objects). **Enter** or a click picks the spline in the middle of
+the view or under the cursor (points along it mark it, its start green and its end red),
+**Tab** the next nearest. Then:
+
+| Key | What it does |
+| --- | --- |
+| **I/K/J/L**, **U/O** | move it forward, back, left, right as the camera faces, down and up (half a metre, a twentieth with Shift) |
+| **N/M**, the wheel | turn it about its start (5°, 0.5° with Shift); Shift+wheel raises it |
+| **G/H** | shorter / longer (a metre, a tenth with Shift) |
+| **R/T** | bend it to the left / to the right (the curvature in steps of 1/400 m, a tenth with Shift); **B** makes it straight |
+| **Page Up/Down** | the gradient at both ends up / down (half a percent, a tenth with Shift) |
+| **C** | a new spline of the same type that goes on where this one ends (before its start when its end is joined already) - press C again and again to lay a road piece by piece |
+| **P** | join its start to the end of the spline before it (its own, or the nearest free end within 15 m) |
+| **Shift+P** | pull the splines after it, along the chain, onto its end (after making it longer or bending it) |
+| **V** | the next spline type of its folder |
+| **Delete** | take it away (again: back); its neighbours forget it, and the rows of objects along it go with it when saved |
+| **Backspace** | undo everything done to it (a new one goes) |
+
+The tile is drawn again with the new splines a moment after the keys rest - road meshes,
+lanes for the traffic, the ground cut under aligned roads and the object rows along them.
+**Ctrl+S** writes the splines into the same tile copies as the objects; a new spline is added
+after the tile's own, so the object rows keep their splines. Deleting and adding need a tile
+of version 11 or newer (the records name their neighbours by IDCode). Not yet: crossings and other
+`[splinehelper]` objects do not move with a spline, the navigator's map shows the roads as
+they were until the next start, and in a LAN session the spline edits are not sent to the
+other players.
 
 ## Mirror panels
 
