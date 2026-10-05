@@ -455,7 +455,7 @@ impl Editor {
         let Some(sp) = self.splines.as_mut() else { return String::new() };
         let edits = world.spline_edits.lock();
         if sp.pick(&edits, eye, forward.as_dvec3()).is_none() {
-            return "No spline there (point the view at a road, a rail or a path)".into();
+            return omsi_ui::tr("No road there. Point at a road, rail or path.").into_owned();
         }
         sp.describe(&edits)
     }
@@ -489,7 +489,7 @@ impl Editor {
     /// V: the selected spline takes the next type of its folder.
     pub fn spline_next_type(&mut self, world: &World) -> String {
         let Some(sp) = self.splines.as_ref() else { return String::new() };
-        let Some((tile, id)) = sp.selected else { return "Pick a spline first (Enter, or a click)".into() };
+        let Some((tile, id)) = sp.selected else { return omsi_ui::tr("Pick a road first: point at it and press Enter").into_owned() };
         let Some(cur) = sp.current(&world.spline_edits.lock(), tile, id) else { return String::new() };
         let file = omsi_cfg::resolve_path(&world.root, cur.file.trim());
         let Some(dir) = file.parent() else { return String::new() };
@@ -499,7 +499,7 @@ impl Editor {
         names.sort_by_key(|n| n.to_ascii_lowercase());
         match crate::spline_editor::next_type(cur.file.trim(), &names) {
             Some(f) => self.spline_apply(world, &Op::SetFile(f)),
-            None => format!("No other spline types beside {}", file.display()),
+            None => omsi_ui::tr("No other road types in this folder").into_owned(),
         }
     }
 
