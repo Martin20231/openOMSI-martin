@@ -207,6 +207,9 @@ pub struct State {
     pub loading_lines: bool,
     pub choice: Choice,
     pub choice_dirty: f32,
+    /// The next launch is "Start at the depot": on foot beside the parked buses. Cleared
+    /// once that duty is built, so a later drive still starts in the bus.
+    pub depot_launch: bool,
     /// Map, whether it has a `laststn.osn`, when that was looked up.
     pub last_sit: Option<(String, Vec<core::SavedSituation>, std::time::Instant)>,
     /// Which of them "Continue" starts (0: the newest, the last situation when there is one).
@@ -282,6 +285,7 @@ impl State {
             loading_lines: false,
             choice,
             choice_dirty: 0.0,
+            depot_launch: false,
             last_sit: None,
             save_pick: 0,
             profiles: Vec::new(),
@@ -642,6 +646,7 @@ impl State {
             schedule: Some(c.schedule),
             autostart: Some(c.autostart),
             on_foot: Some(c.on_foot),
+            depot_start: self.depot_launch.then_some(true),
             profile: Some(self.config.profile.clone()).filter(|p| !p.is_empty()),
             lan: Some(lan),
             lan_name: None,

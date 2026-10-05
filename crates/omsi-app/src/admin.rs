@@ -468,13 +468,15 @@ pub(crate) fn command(app: &mut App, from: u32, text: &str) {
                     let first = app.remote_company.is_none();
                     app.remote_company = Some((short.trim().chars().take(40).collect(), b));
                     if first {
-                        app.service_msg = Some((format!("{} {}", omsi_ui::tr("You drive for the host's company:"), short.trim()), 6.0));
+                        app.service_msg = Some((format!("{} {} · {}", omsi_ui::tr("You drive for the host's company:"), short.trim(), omsi_ui::tr("F6 clocks in")), 8.0));
                     }
                 }
             }
         }
         // (a friend → the host) the state of their run for the host's company
         "comprun" if from != 1 => app.friend_run(from, arg),
+        // (a friend → the host) they clocked out: the seconds on their shift
+        "compshift" if from != 1 => app.friend_shift(from, arg),
         // (host by code: only the host administers its own game)
         _ => log::info!("LAN: command '{text}' from player {from} not taken"),
     }

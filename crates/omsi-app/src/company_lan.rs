@@ -33,6 +33,23 @@ pub(crate) struct FriendRun {
 /// The friends' runs the host keeps until they are written, by (player id, run id).
 pub(crate) type FriendRuns = HashMap<(u32, u64), FriendRun>;
 
+/// The line shown when a shift ends: the wage, and the overtime part when there is one.
+fn shift_out_text(seconds: f64) -> String {
+    use omsi_launcher_lib::company::{money, shift_pay, tuning};
+    let t = tuning();
+    let pay = shift_pay(seconds, t.shift_minutes * 60.0, t.driver_wage, t.overtime_extra);
+    if pay.wage < 0.01 {
+        return omsi_ui::tr("Clocked out. Under 10 minutes does not count as work time yet.").into_owned();
+    }
+    if pay.overtime_hours > 0.01 {
+        omsi_ui::tr("Clocked out. Wage {wage}, overtime {overtime}.")
+            .replace("{wage}", &money(pay.wage))
+            .replace("{overtime}", &money(pay.overtime_hours * t.driver_wage * (1.0 + t.overtime_extra)))
+    } else {
+        omsi_ui::tr("Clocked out. Wage {wage}.").replace("{wage}", &money(pay.wage))
+    }
+}
+
 /// Seconds between the host's company announcements, and between a friend's run updates.
 const ANNOUNCE_EVERY: f32 = 10.0;
 const RUN_EVERY: f32 = 30.0;
@@ -175,6 +192,109 @@ impl App {
         if let Some(l) = self.lan.as_mut().filter(|l| l.role == omsi_net::Role::Client) {
             l.command(1, &text);
         }
+    }
+
+    /// F7: the boss hides the company account and sees only a driver's shift, or switches back.
+    pub(crate) fn toggle_driver_view(&mut self) {
+        if self.lan.as_ref().is_some_and(|l| l.role == omsi_net::Role::Client && self.remote_company.is_some()) {
+            self.service_msg = Some((omsi_ui::tr("You are a driver here. The company account stays hidden").into_owned(), 5.0));
+            return;
+        }
+        self.as_driver = !self.as_driver;
+        let text = if self.as_driver {
+            omsi_ui::tr("Driver view: no company account. F7 switches back to boss")
+        } else {
+            omsi_ui::tr("Boss view: the company account is shown. F7 switches to the driver view")
+        };
+        self.service_msg = Some((text.into_owned(), 6.0));
+    }
+
+    /// F6: start the shift, or end it and pay the wage.
+    pub(crate) fn toggle_company_shift(&mut self) {
+        if self.company.is_none() && self.remote_company.is_none() {
+            self.service_msg = Some((omsi_ui::tr("No company to clock in for").into_owned(), 4.0));
+            return;
+        }
+        if self.shift_on {
+            self.clock_out_shift();
+            return;
+        }
+        self.shift_on = true;
+        self.shift_seconds = 0.0;
+        self.tablet_after = false;
+        self.shift_bill = None;
+        self.shift_snap = Some(crate::tablet::ShiftSnap {
+            metres: self.career.metres,
+            stops: self.career.stops,
+            crashes: self.career.crashes[0],
+        });
+        self.service_msg = Some((omsi_ui::tr("Clocked in. F6 clocks out at the end of the shift").into_owned(), 6.0));
+    }
+
+    /// End the shift and pay it: the host's account here, or a note to the host when this
+    /// game joined theirs.
+    pub(crate) fn clock_out_shift(&mut self) {
+        if !self.shift_on {
+            return;
+        }
+        self.shift_on = false;
+        let seconds = self.shift_seconds.min(14.0 * 3600.0);
+        self.shift_seconds = 0.0;
+        self.remember_shift(seconds);
+        if matches!(self.list_kind, Some(crate::game_lists::ListKind::Tablet)) {
+            self.tablet_after = true;
+        }
+        let client = self.lan.as_ref().is_some_and(|l| l.role == omsi_net::Role::Client) && self.remote_company.is_some();
+        if client {
+            let text = format!("compshift {seconds:.0}");
+            if let Some(l) = self.lan.as_mut() {
+                l.command(1, &text);
+            }
+            self.service_msg = Some((shift_out_text(seconds), 8.0));
+            return;
+        }
+        let pay = self.company.as_mut().map(|c| c.pay_player_shift(seconds));
+        if let Some(c) = self.company.as_ref() {
+            if let Err(e) = c.save(&omsi_launcher_lib::company_path()) {
+                log::warn!("company shift: {e}");
+            }
+        }
+        self.company_sync_t = 0.0;
+        if pay.is_some() {
+            self.service_msg = Some((shift_out_text(seconds), 8.0));
+        }
+    }
+
+    /// Keep the shift's kilometres, stops and crashes for the settlement.
+    fn remember_shift(&mut self, seconds: f64) {
+        let snap = self.shift_snap.take().unwrap_or(crate::tablet::ShiftSnap {
+            metres: self.career.metres,
+            stops: self.career.stops,
+            crashes: self.career.crashes[0],
+        });
+        self.shift_bill = Some(crate::tablet::bill_from(self.career.metres, self.career.stops, self.career.crashes[0], snap, seconds));
+    }
+
+    /// The host's game: a friend clocked out (`arg` is the seconds they were on the clock).
+    pub(crate) fn friend_shift(&mut self, from: u32, arg: &str) {
+        if self.shared_company().is_none() {
+            return;
+        }
+        let Some(seconds) = arg.trim().parse::<f64>().ok().filter(|s| s.is_finite() && *s >= 0.0 && *s <= 14.0 * 3600.0) else {
+            log::info!("company: a shift of player {from} that does not read: '{arg}'");
+            return;
+        };
+        let name = self.lan.as_ref().and_then(|l| l.peers().find(|p| p.pose.id == from).map(|p| p.pose.name.clone())).unwrap_or_else(|| format!("Player {from}"));
+        if let Some(c) = self.company.as_mut() {
+            let pay = c.pay_player_shift(seconds);
+            log::info!("company: {name} clocked out after {:.0} min, wage {:.2}", seconds / 60.0, pay.wage);
+        }
+        if let Some(c) = self.company.as_ref() {
+            if let Err(e) = c.save(&omsi_launcher_lib::company_path()) {
+                log::warn!("company shift: {e}");
+            }
+        }
+        self.company_sync_t = 0.0;
     }
 
     /// The host's game: a friend's run came (`from` is their player id).

@@ -410,6 +410,55 @@ impl App {
         }
     }
 
+    /// The bus the depot start sat the player in becomes a parked bus, and the player
+    /// stands beside its driver's door (walk up and press G to drive it).
+    pub(crate) fn park_driven_and_walk(&mut self) {
+        if self.player.is_none() {
+            return;
+        }
+        let stand = self.stand_by_driver_door();
+        let (uid, file) = (self.player.as_ref().unwrap().uid, self.driven_bus_file());
+        self.remember_company_bus(uid, &file);
+        let mut p = self.player.take().unwrap();
+        if let (Some(a), Some(mut ss)) = (self.audio.as_ref(), p.sounds.take()) {
+            ss.stop_all(a);
+        }
+        if let Some(mut d) = p.driver.take() {
+            if let (Some(r), Some(scene)) = (self.renderer.as_ref(), self.scene.as_mut()) {
+                d.hide(r, scene);
+            }
+        }
+        self.placed.push(p);
+        self.start_on_foot(stand.0, stand.1);
+        // (the first picture is already beside the door: the walk's camera follows a frame later)
+        if let Some(cam) = self.camera.as_mut() {
+            cam.position = stand.0 + DVec3::new(0.0, 0.0, 1.62);
+            cam.yaw = stand.1 as f32;
+            cam.pitch = -5.0;
+        }
+    }
+
+    /// Where to stand when leaving the driven bus: by the driver's door, else beside the cab.
+    fn stand_by_driver_door(&mut self) -> (DVec3, f64) {
+        let p = self.player.as_ref().unwrap();
+        let v = &p.vehicle;
+        if self.humans.is_none() {
+            let mut h = crate::humans::Humans::new(&self.args.root);
+            h.avatar_only = true;
+            self.humans = Some(h);
+        }
+        let door = self.humans.as_mut().and_then(|h| h.vehicle_driver_door(v));
+        let h = v.heading.to_radians();
+        let (fwd, right) = (DVec2::new(h.sin(), h.cos()), DVec2::new(h.cos(), -h.sin()));
+        let half = v.ty.def.bounding_box.map(|b| (b[0] as f64 * 0.5, b[1] as f64 * 0.5 + b[4] as f64)).unwrap_or((1.25, 5.5));
+        let p = door.unwrap_or_else(|| {
+            let xy = v.position.truncate() + fwd * (half.1 - 1.8) - right * (half.0 + 0.8);
+            DVec3::new(xy.x, xy.y, v.position.z)
+        });
+        let z = self.world.as_ref().and_then(|w| w.walk_height_near(p.x, p.y, p.z)).unwrap_or(p.z);
+        (DVec3::new(p.x, p.y, z), v.heading)
+    }
+
     /// Esc → Remove this vehicle: the bus driven goes (its riders step out where they are)
     /// and the player stands beside where its driver's door was, on foot; another bus is
     /// taken by walking up to its driver's door (G), or placed from the menu.
@@ -418,26 +467,7 @@ impl App {
             self.service_msg = Some(("There is no vehicle to remove: you are on foot".into(), 3.0));
             return;
         }
-        // where to stand: by the driver's door, else beside the cab
-        let stand = {
-            let p = self.player.as_ref().unwrap();
-            let v = &p.vehicle;
-            if self.humans.is_none() {
-                let mut h = crate::humans::Humans::new(&self.args.root);
-                h.avatar_only = true;
-                self.humans = Some(h);
-            }
-            let door = self.humans.as_mut().and_then(|h| h.vehicle_driver_door(v));
-            let h = v.heading.to_radians();
-            let (fwd, right) = (DVec2::new(h.sin(), h.cos()), DVec2::new(h.cos(), -h.sin()));
-            let half = v.ty.def.bounding_box.map(|b| (b[0] as f64 * 0.5, b[1] as f64 * 0.5 + b[4] as f64)).unwrap_or((1.25, 5.5));
-            let p = door.unwrap_or_else(|| {
-                let xy = v.position.truncate() + fwd * (half.1 - 1.8) - right * (half.0 + 0.8);
-                DVec3::new(xy.x, xy.y, v.position.z)
-            });
-            let z = self.world.as_ref().and_then(|w| w.walk_height_near(p.x, p.y, p.z)).unwrap_or(p.z);
-            (DVec3::new(p.x, p.y, z), v.heading)
-        };
+        let stand = self.stand_by_driver_door();
         if let Some(f) = self.on_foot.take() {
             if let Some(h) = self.humans.as_mut() {
                 h.avatar_remove(AVATAR_KEY);
@@ -788,7 +818,7 @@ impl App {
                 if pressed && !repeat {
                     if ctrl && shift && self.on_foot.as_ref().map(|f| f.inside.is_some()).unwrap_or(false) {
                         self.step_out();
-                    } else {
+                    } else if !self.try_workshop() {
                         self.use_seat();
                     }
                 }

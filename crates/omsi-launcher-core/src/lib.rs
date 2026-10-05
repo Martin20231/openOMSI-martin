@@ -2318,6 +2318,10 @@ pub struct Duty {
     /// taken over from the game menu later.
     #[serde(default)]
     pub on_foot: Option<bool>,
+    /// Start at the company depot on foot: the bus stays parked, the player walks to its
+    /// driver's door and presses G.
+    #[serde(default)]
+    pub depot_start: Option<bool>,
     pub profile: Option<String>,
     /// LAN play: "host", or "join:<session code | ip[:port] | port | empty = search>".
     pub lan: Option<String>,
@@ -2504,6 +2508,9 @@ pub fn duty_args(d: &Duty) -> Result<Vec<String>> {
     }
     if d.on_foot.unwrap_or(false) {
         a.push("--on-foot".into());
+    }
+    if d.depot_start.unwrap_or(false) {
+        a.push("--depot-start".into());
     }
     let profile = d.profile.clone().filter(|p| !p.trim().is_empty()).unwrap_or_else(|| load_config().profile);
     if let Some(season) = d.season.as_deref().map(str::trim).filter(|x| !x.is_empty() && !x.eq_ignore_ascii_case("auto")) {
@@ -2819,6 +2826,15 @@ mod tests {
         assert_eq!((a[k + 1].as_str(), a[k + 2].as_str()), ("5", "--whole-tour"));
         let alone = duty_args(&Duty { whole_tour: false, ..d }).unwrap();
         assert!(!alone.iter().any(|x| x == "--whole-tour"));
+    }
+
+    /// A duty file from before the depot start has none, and one that asks for it keeps it.
+    #[test]
+    fn a_depot_start_is_kept_and_older_duties_have_none() {
+        let old: Duty = serde_json::from_str(r#"{"map":"maps/x/global.cfg","bus":"Vehicles/x.bus","time":"09:00"}"#).unwrap();
+        assert_eq!(old.depot_start, None);
+        let on: Duty = serde_json::from_str(r#"{"map":"maps/x/global.cfg","bus":"Vehicles/x.bus","time":"09:00","depot_start":true}"#).unwrap();
+        assert_eq!(on.depot_start, Some(true));
     }
 
     #[test]

@@ -99,6 +99,12 @@ pub struct Tuning {
     pub resale_share: f64,
     /// At most this many of the company's buses stand on its depot in the game.
     pub depot_buses: f64,
+    /// What the player earns an hour while clocked in (€).
+    pub driver_wage: f64,
+    /// Extra share on the hourly wage for time past the planned shift (0.25 = 25 %).
+    pub overtime_extra: f64,
+    /// A normal shift (minutes). Full 10-minute blocks beyond it are overtime.
+    pub shift_minutes: f64,
 }
 
 impl Default for Tuning {
@@ -124,6 +130,9 @@ impl Default for Tuning {
             workshop_share: 0.25,
             resale_share: 0.5,
             depot_buses: 12.0,
+            driver_wage: 22.0,
+            overtime_extra: 0.25,
+            shift_minutes: 20.0,
         }
     }
 }
@@ -142,7 +151,7 @@ const RULE_KEYS: [(&str, &str); 10] = [
     ("ki_einnahmen_pro_stunde", "Fahrkarten eines KI-Fahrers pro Stunde bei vollem Können (€)"),
     ("leihbus_pro_stunde", "Leihgebühr pro Stunde für einen Bus, der nicht der Firma gehört (€)"),
 ];
-const GENERAL_KEYS: [(&str, &str); 11] = [
+const GENERAL_KEYS: [(&str, &str); 14] = [
     ("stunden_pro_tag", "So viele Stunden Fahrzeit sind ein Firmentag"),
     ("liter_pro_km", "Dieselverbrauch eines Busses (Liter pro km)"),
     ("ki_tempo", "Durchschnittstempo der KI-Busse auf ihrer Linie (km/h)"),
@@ -154,6 +163,9 @@ const GENERAL_KEYS: [(&str, &str); 11] = [
     ("werkstatt_anteil", "Werkstatt: dieser Anteil vom Neupreis für einen ganz verschlissenen Bus"),
     ("verkauf_anteil", "Verkauf: dieser Anteil vom Neupreis (abzüglich Verschleiß)"),
     ("betriebshof_max_busse", "So viele Firmenbusse stehen im Spiel höchstens auf dem Betriebshof"),
+    ("fahrer_lohn_pro_stunde", "Lohn des Fahrers pro eingestempelter Stunde (€)"),
+    ("ueberstunden_zuschlag", "Zuschlag auf den Stundenlohn nach dem Ende der Schicht (0.25 = 25 %)"),
+    ("schicht_minuten", "So viele Minuten dauert eine normale Schicht, danach sind es Überstunden (Schritte zu 10 Minuten)"),
 ];
 
 impl Rules {
@@ -186,7 +198,10 @@ impl Tuning {
             7 => &mut self.price_small,
             8 => &mut self.workshop_share,
             9 => &mut self.resale_share,
-            _ => &mut self.depot_buses,
+            10 => &mut self.depot_buses,
+            11 => &mut self.driver_wage,
+            12 => &mut self.overtime_extra,
+            _ => &mut self.shift_minutes,
         }
     }
 
@@ -236,10 +251,39 @@ impl Tuning {
                 }
             }
         }
-        // (a day of no hours would never end)
+        // (a day of no hours would never end; a shift shorter than one pay block would be all overtime)
         t.hours_per_day = t.hours_per_day.max(0.1);
+        t.shift_minutes = t.shift_minutes.max(10.0);
         t
     }
+}
+
+/// What a clocked-in shift pays. Time is paid in whole 10-minute blocks (one sixth of the
+/// hourly wage). Under 10 minutes is not work time yet. Blocks past the planned shift
+/// take the overtime extra.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShiftPay {
+    pub regular_hours: f64,
+    pub overtime_hours: f64,
+    pub wage: f64,
+}
+
+/// One pay step (seconds). The hourly wage is split into these.
+const PAY_BLOCK: f64 = 600.0;
+
+/// Pay for `seconds` on the clock against a planned shift of `planned_seconds`.
+pub fn shift_pay(seconds: f64, planned_seconds: f64, hourly: f64, overtime_extra: f64) -> ShiftPay {
+    let seconds = if seconds.is_finite() { seconds.max(0.0) } else { 0.0 };
+    let planned = if planned_seconds.is_finite() { planned_seconds.max(0.0) } else { 0.0 };
+    let hourly = if hourly.is_finite() { hourly.max(0.0) } else { 0.0 };
+    let extra = if overtime_extra.is_finite() { overtime_extra.max(0.0) } else { 0.0 };
+    let blocks = (seconds / PAY_BLOCK).floor();
+    let plan_blocks = (planned / PAY_BLOCK).floor();
+    let regular_blocks = blocks.min(plan_blocks).max(0.0);
+    let overtime_blocks = (blocks - plan_blocks).max(0.0);
+    let slice = hourly / 6.0;
+    let wage = ((regular_blocks * slice + overtime_blocks * slice * (1.0 + extra)) * 100.0).round() / 100.0;
+    ShiftPay { regular_hours: regular_blocks / 6.0, overtime_hours: overtime_blocks / 6.0, wage }
 }
 
 fn fmt_num(v: f64) -> String {
@@ -686,6 +730,17 @@ impl Company {
         self.hours += hours;
     }
 
+    /// The player's own shift, clocked out: the wage leaves the account (normal time, and
+    /// overtime past the planned shift).
+    pub fn pay_player_shift(&mut self, seconds: f64) -> ShiftPay {
+        let t = tuning();
+        let pay = shift_pay(seconds, t.shift_minutes * 60.0, t.driver_wage, t.overtime_extra);
+        if pay.wage > 0.0 {
+            self.book_entry(Kind::Wages, -pay.wage, "Duty time");
+        }
+        pay
+    }
+
     /// Buy a new bus (`file`, `name` as the launcher lists the vehicle).
     pub fn buy(&mut self, file: &str, name: &str) -> Result<u32, String> {
         let price = price_for(name, file);
@@ -732,6 +787,14 @@ impl Company {
         let text = format!("{} ({})", b.name, b.nr);
         self.book_entry(Kind::Workshop, -cost, &text);
         Ok(cost)
+    }
+
+    /// How long the mechanic needs, in seconds. A small fleet should not wait: 15 s, plus
+    /// 0.3 s for each percent missing, and never more than 45 s.
+    pub fn repair_seconds(condition: f64) -> f32 {
+        let c = if condition.is_finite() { condition.clamp(0.0, 100.0) } else { 0.0 };
+        let missing = (100.0 - c) as f32;
+        (15.0 + missing * 0.3).min(45.0)
     }
 
     /// Put a bus on a line ("" = back to the depot).
@@ -1087,6 +1150,116 @@ pub fn depot_entries(entries: &[String], depot: &str) -> Vec<usize> {
     }
 }
 
+/// One company bus, as the workshop looks at it this frame.
+#[derive(Clone, Copy)]
+pub struct WorkshopBus {
+    pub nr: u32,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub heading: f64,
+    /// Metres from the bus origin to the mechanic (past the nose).
+    pub front: f64,
+    pub condition: f64,
+    /// Waiting on the depot, not the bus the player is driving.
+    pub parked: bool,
+    pub on_foot: bool,
+    pub stopped: bool,
+    pub at_depot: bool,
+    /// Seconds left, once the repair was started.
+    pub seconds_left: Option<f32>,
+}
+
+/// Feet of the mechanic, `front` metres ahead of the bus origin, facing the bus.
+/// Heading 0 looks along +y, the same way a parked bus faces.
+pub fn mechanic_stand(x: f64, y: f64, heading_deg: f64, front: f64) -> (f64, f64, f64) {
+    let h = heading_deg.to_radians();
+    let d = if front.is_finite() { front.max(4.0) } else { 8.0 };
+    (x + h.sin() * d, y + h.cos() * d, heading_deg + 180.0)
+}
+
+/// Where the mechanic stands, when this bus is in the workshop. None while it is
+/// fine, or while the bus is still moving. He also stands while the driver is still
+/// in the seat, so the driver can see him before getting out.
+pub fn mechanic_of(b: &WorkshopBus) -> Option<(f64, f64, f64, f64)> {
+    let busy = b.seconds_left.is_some_and(|s| s > 0.0);
+    let worn = b.condition < WORKSHOP_BELOW;
+    if !busy && !worn {
+        return None;
+    }
+    if !b.parked && !(b.stopped && b.at_depot) {
+        return None;
+    }
+    let (mut x, mut y, face) = mechanic_stand(b.x, b.y, b.heading, b.front);
+    // the driver's side of the front corner, so he stands outside the body
+    let h = b.heading.to_radians();
+    let right = (h.cos(), -h.sin());
+    x -= right.0 * 2.5;
+    y -= right.1 * 2.5;
+    Some((x, y, b.z, face))
+}
+
+/// A company bus standing on the depot, as the colleagues look at it.
+#[derive(Clone, Copy)]
+pub struct YardSpot {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub heading: f64,
+}
+
+/// Up to three colleagues among the parked buses: (x, y, z, facing in degrees).
+/// In the gap between two buses, a step back from the cab so the door stays free.
+/// One bus alone gets two people beside it. An empty yard gets nobody.
+pub fn colleagues(buses: &[YardSpot]) -> Vec<(f64, f64, f64, f64)> {
+    if buses.is_empty() {
+        return Vec::new();
+    }
+    let face_of = |x: f64, y: f64, bus: &YardSpot| (bus.x - x).atan2(bus.y - y).to_degrees();
+    let mut spots: Vec<(f64, f64, f64, f64)> = Vec::new();
+    for (i, a) in buses.iter().enumerate() {
+        for b in buses.iter().skip(i + 1) {
+            let d = (a.x - b.x).hypot(a.y - b.y);
+            if !(3.2..8.0).contains(&d) {
+                continue;
+            }
+            let h = a.heading.to_radians();
+            let fwd = (h.sin(), h.cos());
+            let x = (a.x + b.x) * 0.5 - fwd.0 * 2.0;
+            let y = (a.y + b.y) * 0.5 - fwd.1 * 2.0;
+            let z = (a.z + b.z) * 0.5;
+            if spots.iter().any(|s| (s.0 - x).hypot(s.1 - y) < 1.5) {
+                continue;
+            }
+            spots.push((x, y, z, face_of(x, y, a)));
+            if spots.len() == 3 {
+                return spots;
+            }
+        }
+    }
+    if spots.is_empty() {
+        let a = &buses[0];
+        let h = a.heading.to_radians();
+        let right = (h.cos(), -h.sin());
+        let fwd = (h.sin(), h.cos());
+        for back in [1.5, 3.2] {
+            let x = a.x + right.0 * 3.4 - fwd.0 * back;
+            let y = a.y + right.1 * 3.4 - fwd.1 * back;
+            spots.push((x, y, a.z, face_of(x, y, a)));
+        }
+        return spots;
+    }
+    if spots.len() == 1 {
+        let a = &buses[0];
+        let h = a.heading.to_radians();
+        let fwd = (h.sin(), h.cos());
+        let (x, y, z, _) = spots[0];
+        let (x, y) = (x - fwd.0 * 1.6, y - fwd.1 * 1.6);
+        spots.push((x, y, z, face_of(x, y, a)));
+    }
+    spots
+}
+
 /// The company's buses that wait on its depot in the game, in the order they are put down:
 /// not those on the road for its hired drivers (`on_lines`: with the timetable's buses), nor
 /// the one the player drives (`driven`, the file); the worn ones (under 30 %) last, apart.
@@ -1321,6 +1494,26 @@ mod tests {
         assert_eq!(t.hours_per_day, 0.1);
         assert_eq!(t.levels[0], d.levels[0]);
         assert!(d.to_text().contains("# Dieselpreis"));
+        assert_eq!(t.driver_wage, d.driver_wage, "a missing wage keeps the default");
+    }
+
+    #[test]
+    fn a_shift_pays_in_ten_minute_blocks_and_nothing_under_ten() {
+        let short = shift_pay(9.0 * 60.0, 20.0 * 60.0, 22.0, 0.25);
+        assert_eq!(short.wage, 0.0, "under 10 minutes is not work time yet");
+        let one = shift_pay(10.0 * 60.0, 20.0 * 60.0, 22.0, 0.25);
+        assert!((one.wage - 3.67).abs() < 0.001, "10 minutes is a sixth of the hourly wage");
+        let full = shift_pay(20.0 * 60.0, 20.0 * 60.0, 22.0, 0.25);
+        assert!((full.wage - 7.33).abs() < 0.001);
+        assert_eq!(full.overtime_hours, 0.0, "20 minutes is the whole normal shift");
+        let over = shift_pay(30.0 * 60.0, 20.0 * 60.0, 22.0, 0.25);
+        assert!(over.overtime_hours > 0.0);
+        assert!((over.wage - 11.92).abs() < 0.001, "the third block takes the 25 % extra");
+        let mut c = company();
+        let before = c.balance;
+        let pay = c.pay_player_shift(20.0 * 60.0);
+        assert!((pay.wage - 7.33).abs() < 0.001);
+        assert!((c.balance - (before - pay.wage)).abs() < 0.001);
     }
 
     #[test]
@@ -1363,5 +1556,70 @@ mod tests {
         let (n0, n1, n2, n3) = (c.buses[0].nr, c.buses[1].nr, c.buses[2].nr, c.buses[3].nr);
         assert_eq!(nrs(depot_buses(&c, true, Some("vehicles/b2/b.bus"))), vec![n3, n0]);
         assert_eq!(nrs(depot_buses(&c, false, None)), vec![n1, n2, n3, n0]);
+    }
+
+    #[test]
+    fn a_worn_bus_is_repaired_in_under_a_minute() {
+        assert!((Company::repair_seconds(100.0) - 15.0).abs() < 1e-3);
+        assert!((Company::repair_seconds(40.0) - 33.0).abs() < 1e-3);
+        assert!((Company::repair_seconds(0.0) - 45.0).abs() < 1e-3);
+        assert_eq!(Company::repair_seconds(f64::NAN), 45.0);
+        let worn = WorkshopBus {
+            nr: 3440,
+            x: 100.0,
+            y: 200.0,
+            z: 4.0,
+            heading: 0.0,
+            front: 7.0,
+            condition: 30.0,
+            parked: true,
+            on_foot: false,
+            stopped: true,
+            at_depot: true,
+            seconds_left: None,
+        };
+        let spot = mechanic_of(&worn).unwrap();
+        assert!((spot.0 - 97.5).abs() < 1e-6 && (spot.1 - 207.0).abs() < 1e-6);
+        assert!((spot.2 - 4.0).abs() < 1e-9 && (spot.3 - 180.0).abs() < 1e-9);
+        let mut fine = worn;
+        fine.condition = 80.0;
+        assert!(mechanic_of(&fine).is_none());
+        let mut driving = worn;
+        driving.parked = false;
+        driving.on_foot = false;
+        driving.stopped = true;
+        driving.at_depot = false;
+        assert!(mechanic_of(&driving).is_none(), "no mechanic in front of a bus on the road");
+        driving.at_depot = true;
+        assert!(mechanic_of(&driving).is_some(), "stopped at the depot, he stands there before you get out");
+        driving.stopped = false;
+        assert!(mechanic_of(&driving).is_none());
+        let mut done = fine;
+        done.seconds_left = Some(10.0);
+        assert!(mechanic_of(&done).is_some(), "he stays until the job is finished");
+    }
+
+    #[test]
+    fn colleagues_stand_between_the_buses_and_clear_of_them() {
+        assert!(colleagues(&[]).is_empty());
+        let one = [YardSpot { x: 100.0, y: 200.0, z: 4.0, heading: 0.0 }];
+        let alone = colleagues(&one);
+        assert_eq!(alone.len(), 2);
+        assert!(alone.iter().all(|s| (s.0 - 100.0).hypot(s.1 - 200.0) > 3.0));
+        let row = [
+            YardSpot { x: 0.0, y: 0.0, z: 1.0, heading: 0.0 },
+            YardSpot { x: 4.6, y: 0.0, z: 1.0, heading: 0.0 },
+            YardSpot { x: 9.2, y: 0.0, z: 1.0, heading: 0.0 },
+        ];
+        let mates = colleagues(&row);
+        assert!(mates.len() >= 2 && mates.len() <= 3);
+        for s in &mates {
+            assert!(row.iter().all(|b| (s.0 - b.x).hypot(s.1 - b.y) > 2.2), "not inside a bus");
+        }
+        for (i, a) in mates.iter().enumerate() {
+            for b in &mates[i + 1..] {
+                assert!((a.0 - b.0).hypot(a.1 - b.1) > 1.2);
+            }
+        }
     }
 }

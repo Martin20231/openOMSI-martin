@@ -5302,7 +5302,9 @@ impl Humans {
                 p.place = Place::Ground;
                 p.tilt = Mat4::IDENTITY;
                 p.interior = 0.0;
-                let ground = cmd.floor.unwrap_or_else(|| world.walk_height(cmd.pos.x, cmd.pos.y).unwrap_or(cmd.pos.z));
+                // (the floor near the feet, not the highest face over them: in a depot's hall the
+                // highest one is its roof, and the walker's body and eyes went up onto it)
+                let ground = cmd.floor.unwrap_or_else(|| world.walk_height_near(cmd.pos.x, cmd.pos.y, cmd.pos.z).unwrap_or(cmd.pos.z));
                 let origin = DVec3::new(cmd.pos.x, cmd.pos.y, if cmd.floor.is_some() { ground } else { cmd.pos.z.max(ground) } + cmd.lift.max(0.0));
                 p.position = origin;
                 p.heading = cmd.heading;

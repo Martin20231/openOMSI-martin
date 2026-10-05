@@ -54,6 +54,11 @@ pub(crate) struct Args {
     /// from the game menu, or a placed one taken over at its driver's door (G).
     #[arg(long)]
     pub(crate) on_foot: bool,
+    /// Company depot: the bus is parked with the others and the player stands beside its
+    /// driver's door (walk up and press G). Not the same as `--on-foot`, which leaves the
+    /// bus out.
+    #[arg(long)]
+    pub(crate) depot_start: bool,
     /// Control preset: `simple` (W/S/A/D and Up/Down drive, Left/Right switch the interior
     /// camera as in OMSI; the default), `wasd`,
     /// `arrows` (leaves W, S and D to the jobs `Inputs/keyboard.cfg` gives them - wipers,

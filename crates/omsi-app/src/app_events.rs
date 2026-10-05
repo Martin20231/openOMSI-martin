@@ -1281,6 +1281,15 @@ impl ApplicationHandler for App {
                 let __t = Instant::now();
                 let sight = self.camera.as_ref().zip(self.surface.as_ref())
                     .and_then(|(c, s)| self.sight_extent(c, (s.config.width, s.config.height)));
+                let spots = self.workshop_spots();
+                let mates = self.colleague_spots();
+                if self.humans.is_none() && (!spots.is_empty() || !mates.is_empty()) {
+                    let mut h = crate::humans::Humans::new(&self.args.root);
+                    h.avatar_only = true;
+                    self.humans = Some(h);
+                }
+                let mut mechanic_shown = std::mem::take(&mut self.workshop_shown);
+                let mut colleague_n = self.colleague_n;
                 if let (Some(h), Some(w), Some(r), Some(scene)) = (
                     self.humans.as_mut(),
                     self.world.as_ref(),
@@ -1307,6 +1316,8 @@ impl ApplicationHandler for App {
                         let own = Some(crate::humans::BusId::Player);
                         f.seat.map(|s| s.0) != own && f.inside.map(|i| i.0) != own
                     });
+                    crate::depot::place_mechanics(h, w, r, scene, &spots, &mut mechanic_shown);
+                    crate::depot::place_colleagues(h, w, r, scene, &mates, &mut colleague_n);
                     h.density = w
                         .global
                         .passenger_density((self.clock.time / 3600.0) as f32)
@@ -1394,6 +1405,8 @@ impl ApplicationHandler for App {
                     }
                     h.sync(r, scene, center);
                 }
+                self.workshop_shown = mechanic_shown;
+                self.colleague_n = colleague_n;
                 *self.profile.entry("humans").or_default() += __t.elapsed().as_secs_f64();
                 self.foot_after_humans();
                 if let (Some(d), Some(p), Some(w), false) = (
@@ -1443,8 +1456,14 @@ impl ApplicationHandler for App {
                         self.service_msg = Some((format!("Crash: {:.0} kJ", crash / 1000.0), 6.0));
                     }
                 }
+                // the workshop mechanic: the clock runs only while the game is not paused
+                self.workshop_frame(if self.paused || self.exiting { 0.0 } else { dt });
                 if !self.paused {
                     crate::admin::guard_fall(self, dt);
+                    // the company shift (F6) counts on foot too, and not while the game is paused
+                    if !self.exiting && self.shift_on {
+                        self.shift_seconds = (self.shift_seconds + dt as f64).min(14.0 * 3600.0);
+                    }
                 }
                 self.placing_frame();
                 // the tiles the spline editor changed, read again once the keys rest
@@ -2068,8 +2087,22 @@ impl ApplicationHandler for App {
                     );
                 }
                 *self.profile.entry("scripted").or_default() += __t.elapsed().as_secs_f64();
+                // the tablet's clock and wage keep up while it is open (a LAN session does not pause)
+                if matches!(self.list_kind, Some(crate::game_lists::ListKind::Tablet)) {
+                    let fresh = crate::game_lists::items(self, &crate::game_lists::ListKind::Tablet);
+                    if let Some(list) = self.admin_list.as_mut() {
+                        if list.len() == fresh.len() {
+                            for (row, new) in list.iter_mut().zip(fresh) {
+                                *row = new;
+                            }
+                        } else {
+                            *list = fresh;
+                        }
+                    }
+                }
                 // (the game menu's lines, for the interface below)
                 let menu_lines = if self.game_menu.is_some() { self.game_menu_items() } else { Vec::new() };
+                let tablet_view = matches!(self.list_kind, Some(crate::game_lists::ListKind::Tablet)).then(|| crate::tablet::tablet_view(self));
                 // (the mirror editor's keys and the panel under the cursor, while it is on)
                 let mirror_help = match (self.player.as_ref(), self.mirror_hud_size()) {
                     (Some(p), Some(size)) => self.mirror_hud.help_lines(p, self.hud_cursor(), size),
@@ -2374,6 +2407,7 @@ impl ApplicationHandler for App {
                             dropdown,
                             menu_kbd: self.menu_kbd,
                             menu_top: self.menu_top,
+                            tablet: tablet_view,
                             // (not over the city map, which has the stops and their times: it
                             // covered the map's zoom and close buttons)
                             timetable: (self.timetable && !map_open).then(|| timetable_rows(self.duty.as_ref(), self.player.as_ref().map(|p| p.vehicle.host.tt_delay as f64))).flatten(),

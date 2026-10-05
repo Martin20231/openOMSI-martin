@@ -37,6 +37,8 @@ pub(crate) enum ListKind {
     PlaceType(String),
     PlaceLivery(String),
     PlaceHof(String, String),
+    /// The company tablet: clock in and out, the shift clock, the wage, the planned line.
+    Tablet,
 }
 
 /// A vehicle file of the menu's list (`Vehicles/...`) as its definition.
@@ -435,6 +437,11 @@ pub(crate) fn items(app: &App, kind: &ListKind) -> Vec<(String, String)> {
                 out.push((tr("This bus has no list of fleet numbers"), "back".into()));
             }
         }
+        ListKind::Tablet => {
+            for (label, action) in tablet_rows(app) {
+                out.push((label, action));
+            }
+        }
     }
     out.push((tr("Back"), "back".into()));
     out
@@ -539,7 +546,25 @@ pub(crate) fn menu_extras(
         ListKind::Spots => (MenuKind::List, head("Teleport to a start point..."), None),
         ListKind::PlaceMaker | ListKind::PlaceType(_) | ListKind::PlaceLivery(_) | ListKind::PlaceHof(..) => (MenuKind::List, head("Place a vehicle..."), None),
         ListKind::Admin => (MenuKind::List, Some((tr("Administration"), String::new())), None),
+        ListKind::Tablet => (MenuKind::Tablet, head("Company tablet..."), None),
     }
+}
+
+/// The tablet's clickable lines. What is drawn comes from `tablet::tablet_view`; these
+/// stay so a click and Enter still clock in and out, and Back still closes the list.
+fn tablet_rows(app: &App) -> Vec<(String, String)> {
+    let stamp = if app.tablet_after {
+        (omsi_ui::tr("Confirm clocking out").into_owned(), "confirm".into())
+    } else if app.shift_on {
+        (omsi_ui::tr("Clock out").into_owned(), "clock".into())
+    } else {
+        (omsi_ui::tr("Clock in").into_owned(), "clock".into())
+    };
+    let mut rows = vec![stamp];
+    for (label, i) in [("Shift ticket", 0), ("Timetable", 1), ("Vehicle", 2), ("Depot", 3), ("Control room", 4)] {
+        rows.push((omsi_ui::tr(label).into_owned(), format!("tab {i}")));
+    }
+    rows
 }
 
 /// Do a line of the list; returns the list to show next (None: back to the menu).
@@ -749,6 +774,29 @@ pub(crate) fn run_move(app: &mut App, kind: &ListKind, action: &str, mv: Move) -
             }
             None
         }
+        ListKind::Tablet if verb == "clock" => {
+            if app.shift_on {
+                // the settlement first; confirming it is what pays
+                app.tablet_after = true;
+            } else {
+                app.toggle_company_shift();
+            }
+            Some(ListKind::Tablet)
+        }
+        ListKind::Tablet if action == "confirm" => {
+            if app.shift_on {
+                app.clock_out_shift();
+            }
+            app.tablet_after = false;
+            app.tablet_tab = 0;
+            app.close_game_menu();
+            None
+        }
+        ListKind::Tablet if verb == "tab" => {
+            app.tablet_tab = arg.parse::<u8>().unwrap_or(0).min(4);
+            Some(ListKind::Tablet)
+        }
+        ListKind::Tablet => Some(ListKind::Tablet),
         ListKind::Numbers => {
             if let (Some((n, reg)), Some(p)) = (arg.split_once('\u{1}'), app.player.as_mut()) {
                 let v = &mut p.vehicle;

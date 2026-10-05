@@ -67,6 +67,8 @@ fn entry_text(s: &str) -> String {
         format!("{} {rest}", tr("Line"))
     } else if let Some(rest) = s.strip_prefix("Free drive") {
         format!("{}{rest}", tr("Free drive"))
+    } else if s == "Duty time" {
+        tr("Duty time")
     } else {
         s.to_string()
     }
@@ -432,7 +434,10 @@ fn overview(l: &mut Launcher, body: Rect) {
                 }
                 l.state.load_lines();
                 l.state.touched();
+                // on foot beside the buses: the player walks to a door and presses G
+                l.state.depot_launch = true;
                 l.state.launch();
+                l.state.depot_launch = false;
             }
             None => l.state.set_status(tr("This map has no start point for the depot"), true),
         }

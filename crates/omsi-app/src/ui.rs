@@ -31,6 +31,8 @@ pub struct TextCache {
     /// draws them (`Weight::Bold`); asked for with `BOLD` in the size.
     bold: FontVec,
     labels: hashbrown::HashMap<(String, u32, [u8; 4]), Label>,
+    /// Material icons already coloured, kept like the labels.
+    icons: hashbrown::HashMap<(String, u32, [u8; 3]), Label>,
     frame: u64,
     /// How strongly the background plates are drawn this frame (`backdrop`).
     backdrop: f32,
@@ -46,7 +48,7 @@ impl TextCache {
         let _ = font.set_variation(b"wght", 500.0);
         let mut bold = FontVec::try_from_vec(ROBOTO.to_vec()).ok()?;
         let _ = bold.set_variation(b"wght", 700.0);
-        Some(TextCache { font, bold, labels: hashbrown::HashMap::new(), frame: 0, backdrop: 1.0, flat: false })
+        Some(TextCache { font, bold, labels: hashbrown::HashMap::new(), icons: hashbrown::HashMap::new(), frame: 0, backdrop: 1.0, flat: false })
     }
 
     /// The texture of `text` at `px` pixels in `color` (alpha = opacity of the outline), and
@@ -116,7 +118,40 @@ impl TextCache {
                     r.free_texture(scene, l.tex);
                 }
             }
+            let old: Vec<_> = self.icons.iter().filter(|(_, l)| self.frame.saturating_sub(l.used) > 240).map(|(k, _)| k.clone()).collect();
+            for k in old {
+                if let Some(l) = self.icons.remove(&k) {
+                    r.free_texture(scene, l.tex);
+                }
+            }
         }
+    }
+
+    /// A Material icon (`description`, `schedule`, …) centred at `center`, `px` pixels, in `color`.
+    fn icon(&mut self, r: &Renderer, scene: &mut Scene, name: &str, px: u32, color: [u8; 3], center: [f32; 2]) {
+        let px = px.max(8);
+        let key = (name.to_string(), px, color);
+        let label = if let Some(l) = self.icons.get_mut(&key) {
+            l.used = self.frame;
+            *l
+        } else {
+            let Some(alpha) = omsi_ui::icons::rasterize(name, px) else { return };
+            let mut rgba = vec![0u8; alpha.len() * 4];
+            for (i, a) in alpha.iter().copied().enumerate() {
+                let o = i * 4;
+                rgba[o] = color[0];
+                rgba[o + 1] = color[1];
+                rgba[o + 2] = color[2];
+                rgba[o + 3] = a;
+            }
+            let img = omsi_texture::Image { width: px, height: px, rgba, has_alpha: true };
+            let tex = r.add_texture(scene, &img, false);
+            let l = Label { tex, w: px, h: px, used: self.frame };
+            self.icons.insert(key, l);
+            l
+        };
+        let (w, h) = (label.w as f32, label.h as f32);
+        scene.overlays.push((label.tex, [center[0] - w * 0.5, center[1] - h * 0.5, center[0] + w * 0.5, center[1] + h * 0.5]));
     }
 }
 
@@ -376,6 +411,9 @@ pub enum MenuKind {
     Tours,
     /// Any other list (drivers, fleet numbers, destinations, liveries ...).
     List,
+    /// The company tablet (the shift ticket). Its picture is [`Ui::draw_tablet`]; the
+    /// lines are only the actions (clock in and out, back).
+    Tablet,
 }
 
 /// The timetable beside a list of lines or tours: a title, a line of facts and rows of
@@ -471,6 +509,8 @@ pub struct Frame<'a> {
     pub menu_kbd: bool,
     /// The drop-down open over a row of the settings window.
     pub dropdown: Option<DropdownView<'a>>,
+    /// The company tablet, when that menu is open.
+    pub tablet: Option<crate::tablet::TabletView>,
 }
 
 pub struct Ui {
@@ -1334,6 +1374,27 @@ fn strip_more(label: &str) -> (&str, bool) {
     }
 }
 
+/// Geometry and colours shared by the tablet's three screens.
+#[derive(Clone, Copy)]
+struct TabletPaint {
+    s: f32,
+    sx: f32,
+    sy: f32,
+    sw: f32,
+    sh: f32,
+    body_y: f32,
+    body_h: f32,
+    pad: f32,
+    ink: [u8; 4],
+    muted: [u8; 4],
+    accent: [u8; 4],
+    card: [u8; 4],
+    edge: [u8; 4],
+    green: [u8; 4],
+    blue: [u8; 4],
+    orange: [u8; 4],
+}
+
 impl Ui {
     /// `text` at `x`, its middle on `cy`; returns its width.
     fn put(&mut self, r: &Renderer, scene: &mut Scene, text: &str, px: u32, color: [u8; 4], x: f32, cy: f32) -> f32 {
@@ -1441,6 +1502,783 @@ impl Ui {
     /// The game menu and its lists (options, lines, tours ...): a card in the middle of a
     /// dimmed picture. Options are settings lines with switches and values; lines and tours
     /// are bigger lines with the timetable of the chosen one beside them.
+    /// The company tablet's shift ticket (picture 2): a dark frame, the shift on the left,
+    /// the trips in the middle, the bus, the wage and punctuality on the right.
+    fn draw_tablet(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, sel: usize, items: &[(&str, &str)]) {
+        use crate::tablet::{RowState, TabletMode};
+        let dim = self.text.plate(r, scene, 6);
+        scene.overlays.push((dim, [0.0, 0.0, f.width, f.height]));
+        self.menu_arrows.clear();
+        self.menu_start = 0;
+        self.menu_rows = items.len().max(1);
+        self.menu_row_h = 40.0;
+        let mut rects = vec![[-1.0e9; 4]; items.len()];
+        let Some(view) = f.tablet.as_ref() else {
+            self.menu_rects = rects;
+            return;
+        };
+        let s0 = menu_scale(f);
+        let s = s0.min((f.width - 16.0).max(200.0) / 1120.0).min((f.height - 16.0).max(200.0) / 740.0).max(0.35);
+        let bezel = [26, 28, 32, 255];
+        let screen = [14, 21, 30, 255];
+        let card = [22, 32, 44, 255];
+        let edge = [35, 49, 66, 255];
+        let ink = [232, 238, 245, 0];
+        let muted = [141, 156, 177, 0];
+        let green = [79, 194, 138, 255];
+        let blue = [90, 169, 255, 255];
+        let orange = [255, 138, 76, 255];
+        let accent = view.color;
+        let bw = 1120.0 * s;
+        let bh = 740.0 * s;
+        let x = ((f.width - bw) * 0.5).round();
+        let y = ((f.height - bh) * 0.5).round();
+        self.text.shadow(r, scene, [x, y, x + bw, y + bh], 26.0 * s, 28.0 * s, 12.0 * s, 140);
+        self.text.rounded(r, scene, [x, y, x + bw, y + bh], 26.0 * s, bezel);
+        let inset = 16.0 * s;
+        let (sx, sy, sw, sh) = (x + inset, y + inset, bw - inset * 2.0, bh - inset * 2.0);
+        self.text.rounded(r, scene, [sx, sy, sx + sw, sy + sh], 16.0 * s, screen);
+        let pad = 16.0 * s;
+        let header_h = 62.0 * s;
+        // the company mark, the title, the driver; the date and the clock on the right
+        let badge = if view.short.trim().is_empty() { "—".to_string() } else { view.short.clone() };
+        let bw_badge = (self.text.width(&badge, 13.0 * s) + 16.0 * s).max(36.0 * s);
+        let by0 = sy + 14.0 * s;
+        self.text.rounded(r, scene, [sx + pad, by0, sx + pad + bw_badge, by0 + 22.0 * s], 5.0 * s, accent);
+        self.put(r, scene, &badge, (13.0 * s) as u32, [18, 14, 8, 0], sx + pad + 8.0 * s, by0 + 11.0 * s);
+        let title = omsi_ui::tr("Company tablet...").trim_end_matches('.').trim_end_matches('…').trim().to_string();
+        self.put(r, scene, &title, (16.0 * s) as u32, ink, sx + pad + bw_badge + 10.0 * s, by0 + 11.0 * s);
+        let who = format!("{} · {}", omsi_ui::tr("Duty"), view.driver);
+        if view.mode == TabletMode::OnDuty {
+            self.put(r, scene, &who, (12.0 * s) as u32, muted, sx + pad, by0 + 36.0 * s);
+        }
+        self.put_right(r, scene, &view.clock, (18.0 * s) as u32, ink, sx + sw - pad, by0 + 12.0 * s);
+        self.put_right(r, scene, &view.date, (12.0 * s) as u32, muted, sx + sw - pad, by0 + 34.0 * s);
+        let hair = [edge[0], edge[1], edge[2], 255];
+        self.text.rounded(r, scene, [sx + pad, sy + header_h, sx + sw - pad, sy + header_h + 1.0], 0.0, hair);
+        let tab_h = 56.0 * s;
+        let body_y = sy + header_h + 12.0 * s;
+        let body_h = sh - header_h - 12.0 * s - tab_h;
+        let paint = TabletPaint { s, sx, sy, sw, sh, body_y, body_h, pad, ink, muted, accent, card, edge, green, blue, orange };
+        if view.tab == 0 && view.mode != TabletMode::OnDuty {
+            if view.mode == TabletMode::ClockIn {
+                self.tablet_clock_in(r, scene, f, view, sel, items, &mut rects, paint);
+            } else {
+                self.tablet_settlement(r, scene, f, view, sel, items, &mut rects, paint);
+            }
+            self.tablet_tabs(r, scene, f, view.tab, sel, items, &mut rects, paint);
+            self.menu_rects = rects;
+            return;
+        }
+        if view.tab != 0 {
+            match view.tab {
+                1 => self.tablet_timetable(r, scene, view, paint),
+                2 => self.tablet_vehicle(r, scene, view, paint),
+                3 => self.tablet_yard(r, scene, view, paint),
+                _ => self.tablet_desk(r, scene, view, paint),
+            }
+            self.tablet_tabs(r, scene, f, view.tab, sel, items, &mut rects, paint);
+            self.menu_rects = rects;
+            return;
+        }
+        let gap = 12.0 * s;
+        let left_w = 248.0 * s;
+        let right_w = 248.0 * s;
+        let lx = sx + pad;
+        let mx = lx + left_w + gap;
+        let mid_w = sw - pad * 2.0 - left_w - right_w - gap * 2.0;
+        let rx = mx + mid_w + gap;
+        let card_at = |ui: &mut Ui, r: &Renderer, scene: &mut Scene, rect: [f32; 4]| {
+            ui.text.rounded(r, scene, rect, 12.0 * s, edge);
+            let i = 1.0 * s;
+            ui.text.rounded(r, scene, [rect[0] + i, rect[1] + i, rect[2] - i, rect[3] - i], 11.0 * s, card);
+        };
+        // left: the shift, then the next departure
+        let shift_h = (body_h * 0.46).max(168.0 * s);
+        let shift = [lx, body_y, lx + left_w, body_y + shift_h];
+        card_at(self, r, scene, shift);
+        let inn = 14.0 * s;
+        self.put(r, scene, &view.duty_name, (12.0 * s) as u32, muted, shift[0] + inn, shift[1] + 20.0 * s);
+        if !view.shift_start.is_empty() {
+            let span = format!("{}–{}", view.shift_start, view.shift_end);
+            self.put_right(r, scene, &span, (12.0 * s) as u32, muted, shift[2] - inn, shift[1] + 20.0 * s);
+        }
+        self.put(r, scene, &view.duty_clock, (36.0 * s) as u32, ink, shift[0] + inn, shift[1] + 58.0 * s);
+        let of_plan = omsi_ui::tr("of {plan}").replace("{plan}", &view.planned_label);
+        let plan_line = if view.overtime { format!("{of_plan} · {}", omsi_ui::tr("overtime")) } else { of_plan };
+        self.put(r, scene, &plan_line, (13.0 * s) as u32, muted, shift[0] + inn, shift[1] + 86.0 * s);
+        let bar = [shift[0] + inn, shift[1] + 104.0 * s, shift[2] - inn, shift[1] + 110.0 * s];
+        self.text.rounded(r, scene, bar, 3.0 * s, edge);
+        let fill_w = (bar[2] - bar[0]) * view.progress.clamp(0.0, 1.0);
+        if fill_w > 1.0 {
+            let fill = if view.overtime { orange } else { accent };
+            self.text.rounded(r, scene, [bar[0], bar[1], bar[0] + fill_w, bar[3]], 3.0 * s, fill);
+        }
+        let stamp = match view.mode {
+            TabletMode::ClockIn => omsi_ui::tr("Clock in").into_owned(),
+            TabletMode::OnDuty | TabletMode::Settlement => omsi_ui::tr("Clock out").into_owned(),
+        };
+        let btn = [shift[0] + inn, shift[3] - inn - 40.0 * s, shift[2] - inn, shift[3] - inn];
+        let over = f.cursor.0 >= btn[0] && f.cursor.0 <= btn[2] && f.cursor.1 >= btn[1] && f.cursor.1 <= btn[3];
+        let clock_i = items.iter().position(|(id, _)| *id == "clock");
+        let lit = over || clock_i.is_some_and(|i| i == sel && f.menu_kbd);
+        let btn_fill = if lit { mix(accent, [255, 255, 255, 255], 0.18) } else { accent };
+        self.text.rounded(r, scene, btn, 8.0 * s, btn_fill);
+        let tw = self.text.width(&stamp, 15.0 * s);
+        self.put(r, scene, &stamp, (15.0 * s) as u32, [18, 14, 8, 0], (btn[0] + btn[2] - tw) * 0.5, (btn[1] + btn[3]) * 0.5);
+        if let Some(i) = clock_i {
+            rects[i] = btn;
+        }
+        let next = [lx, shift[3] + gap, lx + left_w, body_y + body_h];
+        card_at(self, r, scene, next);
+        self.put(r, scene, &omsi_ui::tr("Next departure").into_owned(), (11.0 * s) as u32, muted, next[0] + inn, next[1] + 18.0 * s);
+        if let Some(n) = &view.next {
+            let dest = if n.dest.trim().is_empty() { n.from.clone() } else { n.dest.clone() };
+            let towards = omsi_ui::tr("towards {where}").replace("{where}", &dest);
+            let towards = clip_to(&self.text, &towards, 13.0 * s, left_w - inn * 2.0);
+            self.put(r, scene, &towards, (13.0 * s) as u32, ink, next[0] + inn, next[1] + 42.0 * s);
+            self.put(r, scene, &n.time, (28.0 * s) as u32, ink, next[0] + inn, next[1] + 78.0 * s);
+            let mins = omsi_ui::tr("in {n} min").replace("{n}", &n.minutes.to_string());
+            self.put_right(r, scene, &mins, (13.0 * s) as u32, blue, next[2] - inn, next[1] + 78.0 * s);
+            if !n.from.is_empty() {
+                let note = clip_to(&self.text, &format!("{} {}", n.time, n.from), 12.0 * s, left_w - inn * 2.0);
+                self.put(r, scene, &note, (12.0 * s) as u32, muted, next[0] + inn, next[1] + 108.0 * s);
+            }
+        } else {
+            self.put(r, scene, &omsi_ui::tr("No further departure").into_owned(), (13.0 * s) as u32, muted, next[0] + inn, next[1] + 48.0 * s);
+        }
+        // middle: the shift ticket
+        self.put(r, scene, &omsi_ui::tr("Shift ticket").into_owned(), (12.0 * s) as u32, muted, mx, body_y + 8.0 * s);
+        if view.free_run {
+            let hint = omsi_ui::tr("No duty on this run").into_owned();
+            self.put(r, scene, &hint, (15.0 * s) as u32, ink, mx, body_y + body_h * 0.4);
+        } else {
+            let head_y = body_y + 28.0 * s;
+            let cols = [mx, mx + 58.0 * s, mx + 112.0 * s, mx + mid_w - 148.0 * s, mx + mid_w - 8.0 * s];
+            let heads = [omsi_ui::tr("Time").into_owned(), omsi_ui::tr("Line").into_owned(), omsi_ui::tr("Trip").into_owned(), omsi_ui::tr("Arrival").into_owned(), omsi_ui::tr("Status").into_owned()];
+            for (i, h) in heads.iter().enumerate() {
+                if i >= 3 {
+                    self.put_right(r, scene, h, (11.0 * s) as u32, muted, cols[i], head_y);
+                } else {
+                    self.put(r, scene, h, (11.0 * s) as u32, muted, cols[i], head_y);
+                }
+            }
+            let row_h = 34.0 * s;
+            let room = body_h - 52.0 * s;
+            let fit = ((room - 22.0 * s) / row_h).floor() as usize;
+            let fit = fit.clamp(3, 12);
+            let focus = view.rows.iter().position(|row| matches!(row.state, RowState::Now | RowState::Next)).unwrap_or(0);
+            let (a, b, more) = crate::tablet::rows_in_view(view.rows.len(), focus, fit);
+            for (k, row) in view.rows[a..b].iter().enumerate() {
+                let ry = head_y + 16.0 * s + row_h * k as f32;
+                let rect = [mx - 6.0 * s, ry - row_h * 0.5 + 2.0 * s, mx + mid_w, ry + row_h * 0.5 - 2.0 * s];
+                if row.state == RowState::Now {
+                    self.text.rounded(r, scene, rect, 6.0 * s, [28, 40, 54, 255]);
+                    self.text.rounded(r, scene, [rect[0], rect[1] + 6.0 * s, rect[0] + 3.0 * s, rect[3] - 6.0 * s], 1.5 * s, green);
+                }
+                let (label, col) = match row.state {
+                    RowState::Done => (omsi_ui::tr("done").into_owned(), muted),
+                    RowState::Now => (omsi_ui::tr("right now").into_owned(), [green[0], green[1], green[2], 0]),
+                    RowState::Next => (omsi_ui::tr("as next").into_owned(), [blue[0], blue[1], blue[2], 0]),
+                    RowState::Planned => (omsi_ui::tr("planned").into_owned(), muted),
+                    RowState::Break => (omsi_ui::tr("Pause").into_owned(), [orange[0], orange[1], orange[2], 0]),
+                };
+                let time_ink = if row.state == RowState::Done { muted } else { ink };
+                self.put(r, scene, &row.time, (13.0 * s) as u32, time_ink, cols[0], ry);
+                let line = if row.line.trim().is_empty() { "—".to_string() } else { row.line.clone() };
+                let lw = (self.text.width(&line, 12.0 * s) + 12.0 * s).clamp(28.0 * s, 52.0 * s);
+                self.text.rounded(r, scene, [cols[1], ry - 9.0 * s, cols[1] + lw, ry + 9.0 * s], 4.0 * s, accent);
+                self.put(r, scene, &line, (12.0 * s) as u32, [18, 14, 8, 0], cols[1] + 6.0 * s, ry);
+                let trip = if row.detail.trim().is_empty() || row.detail.trim() == row.what.trim() {
+                    row.what.clone()
+                } else if row.what.trim().is_empty() {
+                    row.detail.clone()
+                } else {
+                    format!("{} → {}", row.what, row.detail)
+                };
+                let trip = clip_to(&self.text, &trip, 13.0 * s, (cols[3] - 70.0 * s) - (cols[1] + lw + 8.0 * s));
+                self.put(r, scene, &trip, (13.0 * s) as u32, time_ink, cols[1] + lw + 8.0 * s, ry);
+                self.put_right(r, scene, &row.arrival, (12.0 * s) as u32, muted, cols[3], ry);
+                self.put_right(r, scene, &label, (12.0 * s) as u32, col, cols[4], ry);
+            }
+            if more > 0 {
+                let more_t = omsi_ui::tr("+ {n} more trips").replace("{n}", &more.to_string());
+                self.put(r, scene, &more_t, (12.0 * s) as u32, muted, mx, head_y + 16.0 * s + row_h * (b - a) as f32 + 8.0 * s);
+            }
+        }
+        // right: the bus, the wage, punctuality
+        let bus_h = (body_h * 0.42).max(188.0 * s);
+        let wage_h = (body_h * 0.32).max(128.0 * s);
+        let bus = [rx, body_y, rx + right_w, body_y + bus_h];
+        card_at(self, r, scene, bus);
+        self.put(r, scene, &omsi_ui::tr("Vehicle").into_owned(), (11.0 * s) as u32, muted, bus[0] + inn, bus[1] + 18.0 * s);
+        if view.bus_nr.is_empty() && view.bus_name.is_empty() {
+            self.put(r, scene, &omsi_ui::tr("No bus taken").into_owned(), (14.0 * s) as u32, ink, bus[0] + inn, bus[1] + 48.0 * s);
+        } else {
+            let wagon = if view.bus_nr.is_empty() { view.bus_name.clone() } else { omsi_ui::tr("Wagon {n}").replace("{n}", &view.bus_nr) };
+            let wagon = clip_to(&self.text, &wagon, 18.0 * s, right_w - inn * 2.0);
+            self.put(r, scene, &wagon, (18.0 * s) as u32, ink, bus[0] + inn, bus[1] + 46.0 * s);
+            if !view.bus_nr.is_empty() && !view.bus_name.is_empty() {
+                let name = clip_to(&self.text, &view.bus_name, 12.0 * s, right_w - inn * 2.0);
+                self.put(r, scene, &name, (12.0 * s) as u32, muted, bus[0] + inn, bus[1] + 70.0 * s);
+            }
+            let mut yb = bus[1] + if !view.bus_nr.is_empty() && !view.bus_name.is_empty() { 96.0 * s } else { 74.0 * s };
+            let mut meters: Vec<(String, f32, [u8; 4])> = Vec::new();
+            if let Some(c) = view.condition {
+                meters.push((omsi_ui::tr("Condition").into_owned(), c, if c < 0.4 { orange } else { green }));
+            }
+            if let Some(t) = view.tank {
+                meters.push((omsi_ui::tr("Tank").into_owned(), t, if t < 0.15 { orange } else { blue }));
+            }
+            for (label, frac, col) in meters {
+                self.put(r, scene, &label, (12.0 * s) as u32, muted, bus[0] + inn, yb);
+                self.put_right(r, scene, &format!("{:.0} %", frac * 100.0), (12.0 * s) as u32, ink, bus[2] - inn, yb);
+                let track = [bus[0] + inn, yb + 12.0 * s, bus[2] - inn, yb + 18.0 * s];
+                self.text.rounded(r, scene, track, 3.0 * s, edge);
+                let fw = (track[2] - track[0]) * frac.clamp(0.0, 1.0);
+                if fw > 1.0 {
+                    self.text.rounded(r, scene, [track[0], track[1], track[0] + fw, track[3]], 3.0 * s, col);
+                }
+                yb += 36.0 * s;
+            }
+            if let Some(km) = view.km {
+                self.put(r, scene, &omsi_ui::tr("Kilometres").into_owned(), (12.0 * s) as u32, muted, bus[0] + inn, yb);
+                self.put_right(r, scene, &format!("{} km", crate::tablet::km_text(km)), (12.0 * s) as u32, ink, bus[2] - inn, yb);
+            }
+        }
+        let wage = [rx, bus[3] + gap, rx + right_w, bus[3] + gap + wage_h];
+        card_at(self, r, scene, wage);
+        self.put(r, scene, &omsi_ui::tr("Your wage").into_owned(), (11.0 * s) as u32, muted, wage[0] + inn, wage[1] + 18.0 * s);
+        self.put(r, scene, &view.wage_now, (26.0 * s) as u32, ink, wage[0] + inn, wage[1] + 48.0 * s);
+        self.put_right(r, scene, &omsi_ui::tr("so far").into_owned(), (12.0 * s) as u32, muted, wage[2] - inn, wage[1] + 48.0 * s);
+        let lines = [(view.hourly.as_str(), omsi_ui::tr("hourly wage").into_owned()), (view.wage_full.as_str(), omsi_ui::tr("full shift").into_owned()), (view.overtime_pct.as_str(), omsi_ui::tr("overtime").into_owned())];
+        for (i, (value, label)) in lines.iter().enumerate() {
+            let cy = wage[1] + 84.0 * s + 22.0 * s * i as f32;
+            self.put(r, scene, value, (13.0 * s) as u32, ink, wage[0] + inn, cy);
+            self.put_right(r, scene, label, (12.0 * s) as u32, muted, wage[2] - inn, cy);
+        }
+        let punct = [rx, wage[3] + gap, rx + right_w, body_y + body_h];
+        card_at(self, r, scene, punct);
+        self.put(r, scene, &omsi_ui::tr("on time").into_owned(), (11.0 * s) as u32, muted, punct[0] + inn, punct[1] + 18.0 * s);
+        if let Some((on, all)) = view.punctual {
+            let share = crate::tablet::punctual_share(on, all).unwrap_or(0.0);
+            let pct = format!("{:.0} %", share * 100.0);
+            self.put(r, scene, &pct, (22.0 * s) as u32, [green[0], green[1], green[2], 0], punct[0] + inn, punct[1] + 48.0 * s);
+            let track = [punct[0] + inn, punct[1] + 70.0 * s, punct[2] - inn, punct[1] + 76.0 * s];
+            self.text.rounded(r, scene, track, 3.0 * s, edge);
+            let fw = (track[2] - track[0]) * share;
+            if fw > 1.0 {
+                self.text.rounded(r, scene, [track[0], track[1], track[0] + fw, track[3]], 3.0 * s, green);
+            }
+            let line = omsi_ui::tr("{on} of {all} stops").replace("{on}", &on.to_string()).replace("{all}", &all.to_string());
+            self.put(r, scene, &line, (12.0 * s) as u32, muted, punct[0] + inn, punct[1] + 96.0 * s);
+        } else {
+            self.put(r, scene, &omsi_ui::tr("No stops served yet").into_owned(), (13.0 * s) as u32, muted, punct[0] + inn, punct[1] + 48.0 * s);
+        }
+        self.tablet_tabs(r, scene, f, view.tab, sel, items, &mut rects, paint);
+        self.menu_rects = rects;
+    }
+
+    fn tablet_card(&mut self, r: &Renderer, scene: &mut Scene, rect: [f32; 4], p: TabletPaint) {
+        self.text.rounded(r, scene, rect, 12.0 * p.s, p.edge);
+        let i = 1.0 * p.s;
+        self.text.rounded(r, scene, [rect[0] + i, rect[1] + i, rect[2] - i, rect[3] - i], 11.0 * p.s, p.card);
+    }
+
+    /// The yellow (or dark) button that clocks in, opens the settlement, or confirms it.
+    fn tablet_stamp(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, sel: usize, items: &[(&str, &str)], rects: &mut [[f32; 4]], rect: [f32; 4], fill: [u8; 4], ink: [u8; 4], s: f32) {
+        let Some(i) = items.iter().position(|(id, _)| *id == "clock" || *id == "confirm") else { return };
+        let over = f.cursor.0 >= rect[0] && f.cursor.0 <= rect[2] && f.cursor.1 >= rect[1] && f.cursor.1 <= rect[3];
+        let lit = over || (i == sel && f.menu_kbd);
+        self.text.rounded(r, scene, rect, 8.0 * s, if lit { mix(fill, [255, 255, 255, 255], 0.18) } else { fill });
+        let label = items[i].1;
+        let tw = self.text.width(label, 15.0 * s);
+        self.put(r, scene, label, (15.0 * s) as u32, ink, (rect[0] + rect[2] - tw) * 0.5, (rect[1] + rect[3]) * 0.5);
+        rects[i] = rect;
+    }
+
+    fn tablet_clock_in(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, view: &crate::tablet::TabletView, sel: usize, items: &[(&str, &str)], rects: &mut [[f32; 4]], p: TabletPaint) {
+        let s = p.s;
+        let gap = 14.0 * s;
+        let left_w = (p.sw - p.pad * 2.0 - gap) * 0.58;
+        let lx = p.sx + p.pad;
+        let rx = lx + left_w + gap;
+        let right_w = p.sx + p.sw - p.pad - rx;
+        let hello = format!("{}, {}", view.hello, view.driver);
+        self.put(r, scene, &hello, (14.0 * s) as u32, p.muted, lx, p.body_y + 8.0 * s);
+        self.put(r, scene, &omsi_ui::tr("Your duty today").into_owned(), (26.0 * s) as u32, p.ink, lx, p.body_y + 36.0 * s);
+        let card = [lx, p.body_y + 64.0 * s, lx + left_w, p.body_y + p.body_h - 78.0 * s];
+        self.tablet_card(r, scene, card, p);
+        let inn = 16.0 * s;
+        if let Some(facts) = &view.facts {
+            let duty = if view.tour_label.is_empty() { view.duty_name.clone() } else { format!("{} · {}", view.duty_name, view.tour_label) };
+            let runs = if facts.breaks == 0 {
+                omsi_ui::tr("{n} trips").replace("{n}", &facts.trips.to_string())
+            } else {
+                omsi_ui::tr("{n} trips, {b} pause ({m} min)")
+                    .replace("{n}", &facts.trips.to_string())
+                    .replace("{b}", &facts.breaks.to_string())
+                    .replace("{m}", &facts.break_min.to_string())
+            };
+            let rows = [
+                (omsi_ui::tr("Duty").into_owned(), duty),
+                (omsi_ui::tr("Time").into_owned(), format!("{} – {}", facts.start, facts.end)),
+                (omsi_ui::tr("Line").into_owned(), String::new()),
+                (omsi_ui::tr("Trips").into_owned(), runs),
+                (omsi_ui::tr("First departure").into_owned(), facts.first.clone()),
+            ];
+            let row_h = ((card[3] - card[1] - 28.0 * s) / rows.len() as f32).clamp(28.0 * s, 44.0 * s);
+            for (i, (label, value)) in rows.iter().enumerate() {
+                let cy = card[1] + 22.0 * s + row_h * (i as f32 + 0.5);
+                self.put(r, scene, label, (13.0 * s) as u32, p.muted, card[0] + inn, cy);
+                if i == 2 {
+                    let line = if facts.line.trim().is_empty() { "—".to_string() } else { facts.line.clone() };
+                    let lw = (self.text.width(&line, 12.0 * s) + 14.0 * s).clamp(28.0 * s, 64.0 * s);
+                    let bx = card[2] - inn - lw - 8.0 * s - self.text.width(&facts.route, 13.0 * s).min(left_w * 0.45);
+                    self.text.rounded(r, scene, [bx, cy - 10.0 * s, bx + lw, cy + 10.0 * s], 4.0 * s, p.accent);
+                    self.put(r, scene, &line, (12.0 * s) as u32, [18, 14, 8, 0], bx + 7.0 * s, cy);
+                    let route = clip_to(&self.text, &facts.route, 13.0 * s, card[2] - inn - (bx + lw + 8.0 * s));
+                    self.put(r, scene, &route, (13.0 * s) as u32, p.ink, bx + lw + 8.0 * s, cy);
+                } else {
+                    let value = clip_to(&self.text, value, 14.0 * s, left_w * 0.62);
+                    self.put_right(r, scene, &value, (14.0 * s) as u32, p.ink, card[2] - inn, cy);
+                }
+            }
+        } else {
+            self.put(r, scene, &omsi_ui::tr("No duty on this run").into_owned(), (14.0 * s) as u32, p.muted, card[0] + inn, (card[1] + card[3]) * 0.5);
+        }
+        let btn = [lx, p.body_y + p.body_h - 68.0 * s, lx + left_w, p.body_y + p.body_h - 22.0 * s];
+        self.tablet_stamp(r, scene, f, sel, items, rects, btn, p.accent, [18, 14, 8, 0], s);
+        let hint = omsi_ui::tr("After clocking in, your duty time and your wage start.").into_owned();
+        let hint = clip_to(&self.text, &hint, 12.0 * s, left_w);
+        self.put(r, scene, &hint, (12.0 * s) as u32, p.muted, lx, p.body_y + p.body_h - 8.0 * s);
+        let bus = [rx, p.body_y, rx + right_w, p.body_y + p.body_h];
+        self.tablet_card(r, scene, bus, p);
+        self.put(r, scene, &omsi_ui::tr("Your bus is waiting").into_owned(), (12.0 * s) as u32, p.muted, bus[0] + inn, bus[1] + 22.0 * s);
+        if view.bus_nr.is_empty() && view.bus_name.is_empty() {
+            self.put(r, scene, &omsi_ui::tr("No bus taken").into_owned(), (18.0 * s) as u32, p.ink, bus[0] + inn, bus[1] + 58.0 * s);
+            return;
+        }
+        let wagon = if view.bus_nr.is_empty() { view.bus_name.clone() } else { omsi_ui::tr("Wagon {n}").replace("{n}", &view.bus_nr) };
+        self.put(r, scene, &clip_to(&self.text, &wagon, 22.0 * s, right_w - inn * 2.0), (22.0 * s) as u32, p.ink, bus[0] + inn, bus[1] + 56.0 * s);
+        if !view.bus_name.is_empty() && !view.bus_nr.is_empty() {
+            self.put(r, scene, &clip_to(&self.text, &view.bus_name, 13.0 * s, right_w - inn * 2.0), (13.0 * s) as u32, p.muted, bus[0] + inn, bus[1] + 82.0 * s);
+        }
+        let mut bits = Vec::new();
+        if let Some(c) = view.condition {
+            bits.push(format!("{} {:.0} %", omsi_ui::tr("Condition"), c * 100.0));
+        }
+        if let Some(t) = view.tank {
+            bits.push(format!("{} {:.0} %", omsi_ui::tr("Tank"), t * 100.0));
+        }
+        if !bits.is_empty() {
+            self.put(r, scene, &bits.join("    "), (13.0 * s) as u32, p.ink, bus[0] + inn, bus[1] + 112.0 * s);
+        }
+        let depot = depot_short(&view.depot);
+        if !depot.is_empty() {
+            self.put(r, scene, &clip_to(&self.text, &depot, 12.0 * s, right_w - inn * 2.0), (12.0 * s) as u32, p.muted, bus[0] + inn, bus[1] + 140.0 * s);
+        }
+        if let Some(stall) = view.stall {
+            let top = bus[1] + 168.0 * s;
+            let bottom = bus[3] - 78.0 * s;
+            let n = 6usize;
+            let g = 8.0 * s;
+            let bw = ((bus[2] - bus[0] - inn * 2.0) - g * (n as f32 - 1.0)) / n as f32;
+            for i in 0..n {
+                let hot = i as u8 == stall;
+                let x = bus[0] + inn + (bw + g) * i as f32;
+                let h = if hot { (bottom - top).max(20.0) } else { (bottom - top) * 0.55 };
+                let col = if hot { p.accent } else { p.edge };
+                self.text.rounded(r, scene, [x, bottom - h, x + bw, bottom], 4.0 * s, col);
+                let cap = if hot { omsi_ui::tr("Wagon {n}").replace("{n}", &view.bus_nr) } else { omsi_ui::tr("Stall {n}").replace("{n}", &(i + 1).to_string()) };
+                let cap = clip_to(&self.text, &cap, 11.0 * s, bw + g);
+                let col = if hot { [p.accent[0], p.accent[1], p.accent[2], 0] } else { p.muted };
+                let tw = self.text.width(&cap, 11.0 * s);
+                self.put(r, scene, &cap, (11.0 * s) as u32, col, x + (bw - tw) * 0.5, bottom + 16.0 * s);
+            }
+            let note = omsi_ui::tr("Yellow: your bus is on stall {n}.").replace("{n}", &view.bus_nr);
+            self.put(r, scene, &clip_to(&self.text, &note, 11.0 * s, right_w - inn * 2.0), (11.0 * s) as u32, p.muted, bus[0] + inn, bus[3] - 36.0 * s);
+            let walk = omsi_ui::tr("On foot, walk there and press G at the driver's door.").into_owned();
+            self.put(r, scene, &clip_to(&self.text, &walk, 11.0 * s, right_w - inn * 2.0), (11.0 * s) as u32, p.muted, bus[0] + inn, bus[3] - 18.0 * s);
+        }
+    }
+
+    fn tablet_settlement(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, view: &crate::tablet::TabletView, sel: usize, items: &[(&str, &str)], rects: &mut [[f32; 4]], p: TabletPaint) {
+        let s = p.s;
+        let gap = 14.0 * s;
+        let left_w = (p.sw - p.pad * 2.0 - gap) * 0.60;
+        let lx = p.sx + p.pad;
+        let rx = lx + left_w + gap;
+        let right_w = p.sx + p.sw - p.pad - rx;
+        let banner = [lx, p.body_y, lx + left_w, p.body_y + 28.0 * s];
+        self.text.rounded(r, scene, banner, 6.0 * s, [18, 36, 58, 255]);
+        let ended = omsi_ui::tr("Duty {name} ended").replace("{name}", &view.duty_name);
+        self.put(r, scene, &clip_to(&self.text, &ended, 13.0 * s, left_w - 20.0 * s), (13.0 * s) as u32, [p.blue[0], p.blue[1], p.blue[2], 0], lx + 10.0 * s, banner[1] + 14.0 * s);
+        let greet = omsi_ui::tr("Good shift, {name}!").replace("{name}", &view.driver);
+        self.put(r, scene, &clip_to(&self.text, &greet, 26.0 * s, left_w), (26.0 * s) as u32, p.ink, lx, p.body_y + 58.0 * s);
+        let slip = view.slip.as_ref();
+        let card_y = p.body_y + 86.0 * s;
+        let card_h = 108.0 * s;
+        let cw = (left_w - gap * 2.0) / 3.0;
+        let titles = [omsi_ui::tr("Duty time").into_owned(), omsi_ui::tr("Driven").into_owned(), omsi_ui::tr("on time").into_owned()];
+        for i in 0..3 {
+            let x = lx + (cw + gap) * i as f32;
+            self.tablet_card(r, scene, [x, card_y, x + cw, card_y + card_h], p);
+            self.put(r, scene, &titles[i], (11.0 * s) as u32, p.muted, x + 12.0 * s, card_y + 18.0 * s);
+        }
+        let time = slip.map(|s| format!("{} h", s.time)).unwrap_or_else(|| "0:00 h".into());
+        self.put(r, scene, &time, (22.0 * s) as u32, p.ink, lx + 12.0 * s, card_y + 52.0 * s);
+        if let Some(slip) = slip.filter(|s| !s.overtime.is_empty()) {
+            let ot = omsi_ui::tr("{time} h overtime").replace("{time}", &slip.overtime);
+            self.put(r, scene, &clip_to(&self.text, &ot, 12.0 * s, cw - 20.0 * s), (12.0 * s) as u32, [p.orange[0], p.orange[1], p.orange[2], 0], lx + 12.0 * s, card_y + 80.0 * s);
+        }
+        let km = slip.map(|s| s.km.clone()).unwrap_or_else(|| "0 km".into());
+        self.put(r, scene, &clip_to(&self.text, &km, 22.0 * s, cw - 16.0 * s), (22.0 * s) as u32, p.ink, lx + cw + gap + 12.0 * s, card_y + 52.0 * s);
+        let ntrips = slip.map(|s| s.trips).unwrap_or(0);
+        let trips_l = omsi_ui::tr("{n} trips").replace("{n}", &ntrips.to_string());
+        self.put(r, scene, &trips_l, (12.0 * s) as u32, p.muted, lx + cw + gap + 12.0 * s, card_y + 80.0 * s);
+        let px = lx + (cw + gap) * 2.0 + 12.0 * s;
+        if let Some((on, all)) = slip.and_then(|s| s.punctual) {
+            let share = crate::tablet::punctual_share(on, all).unwrap_or(0.0);
+            self.put(r, scene, &format!("{:.0} %", share * 100.0), (22.0 * s) as u32, [p.green[0], p.green[1], p.green[2], 0], px, card_y + 52.0 * s);
+            let line = omsi_ui::tr("{on} of {all} stops").replace("{on}", &on.to_string()).replace("{all}", &all.to_string());
+            self.put(r, scene, &clip_to(&self.text, &line, 12.0 * s, cw - 20.0 * s), (12.0 * s) as u32, p.muted, px, card_y + 80.0 * s);
+        } else {
+            self.put(r, scene, &omsi_ui::tr("No stops served yet").into_owned(), (12.0 * s) as u32, p.muted, px, card_y + 52.0 * s);
+        }
+        self.put(r, scene, &omsi_ui::tr("Your trips").into_owned(), (12.0 * s) as u32, p.muted, lx, card_y + card_h + 28.0 * s);
+        if view.rows.is_empty() {
+            self.put(r, scene, &omsi_ui::tr("No duty on this run").into_owned(), (14.0 * s) as u32, p.ink, lx, card_y + card_h + 56.0 * s);
+        } else {
+            let row_h = 26.0 * s;
+            let room = p.body_y + p.body_h - (card_y + card_h + 40.0 * s);
+            let fit = (room / row_h).floor() as usize;
+            let fit = fit.clamp(1, 8);
+            let focus = view.rows.iter().position(|row| matches!(row.state, crate::tablet::RowState::Now | crate::tablet::RowState::Next)).unwrap_or(0);
+            let (a, b, more) = crate::tablet::rows_in_view(view.rows.len(), focus, fit);
+            for (k, row) in view.rows[a..b].iter().enumerate() {
+                let cy = card_y + card_h + 48.0 * s + row_h * k as f32;
+                self.put(r, scene, &row.time, (13.0 * s) as u32, p.ink, lx, cy);
+                let what = if row.detail.trim().is_empty() { row.what.clone() } else { format!("{} → {}", row.what, row.detail) };
+                self.put(r, scene, &clip_to(&self.text, &what, 13.0 * s, left_w - 80.0 * s), (13.0 * s) as u32, p.muted, lx + 64.0 * s, cy);
+            }
+            if more > 0 {
+                let more_t = omsi_ui::tr("+ {n} more trips").replace("{n}", &more.to_string());
+                self.put(r, scene, &more_t, (12.0 * s) as u32, p.muted, lx, card_y + card_h + 48.0 * s + row_h * (b - a) as f32);
+            }
+        }
+        let paper = [rx, p.body_y, rx + right_w, p.body_y + p.body_h];
+        self.text.rounded(r, scene, paper, 12.0 * s, [244, 236, 214, 255]);
+        let pin = [36, 30, 22, 0];
+        let pmut = [120, 108, 90, 0];
+        let inn = 16.0 * s;
+        self.put(r, scene, &omsi_ui::tr("Pay slip").into_owned(), (11.0 * s) as u32, pmut, paper[0] + inn, paper[1] + 22.0 * s);
+        self.put(r, scene, &omsi_ui::tr("Shift settlement").into_owned(), (18.0 * s) as u32, pin, paper[0] + inn, paper[1] + 46.0 * s);
+        let mut y = paper[1] + 84.0 * s;
+        let lines: Vec<(String, String)> = match slip {
+            Some(slip) => {
+                let mut v = vec![(slip.regular.clone(), slip.regular_pay.clone())];
+                if !slip.overtime_line.is_empty() {
+                    v.push((slip.overtime_line.clone(), slip.overtime_pay.clone()));
+                }
+                v.push((omsi_ui::tr("Accidents").into_owned(), slip.crashes.to_string()));
+                v
+            }
+            None => vec![(omsi_ui::tr("Accidents").into_owned(), "0".into())],
+        };
+        for (label, value) in &lines {
+            self.text.rounded(r, scene, [paper[0] + inn, y + 14.0 * s, paper[2] - inn, y + 15.0 * s], 0.0, [210, 198, 170, 255]);
+            self.put(r, scene, &clip_to(&self.text, label, 13.0 * s, right_w * 0.62), (13.0 * s) as u32, pin, paper[0] + inn, y);
+            self.put_right(r, scene, value, (13.0 * s) as u32, pin, paper[2] - inn, y);
+            y += 32.0 * s;
+        }
+        y += 10.0 * s;
+        self.put(r, scene, &omsi_ui::tr("Your wage").into_owned(), (14.0 * s) as u32, pin, paper[0] + inn, y);
+        let wage = slip.map(|s| s.wage.clone()).unwrap_or_else(|| crate::tablet::euro(0.0));
+        self.put_right(r, scene, &wage, (22.0 * s) as u32, pin, paper[2] - inn, y);
+        let btn = [paper[0] + inn, paper[3] - inn - 44.0 * s, paper[2] - inn, paper[3] - inn];
+        self.tablet_stamp(r, scene, f, sel, items, rects, btn, [28, 30, 34, 255], p.ink, s);
+    }
+
+    fn tablet_timetable(&mut self, r: &Renderer, scene: &mut Scene, view: &crate::tablet::TabletView, p: TabletPaint) {
+        let s = p.s;
+        let gap = 14.0 * s;
+        let left_w = (p.sw - p.pad * 2.0 - gap) * 0.56;
+        let lx = p.sx + p.pad;
+        let rx = lx + left_w + gap;
+        let right_w = p.sx + p.sw - p.pad - rx;
+        self.put(r, scene, &omsi_ui::tr("Timetable").into_owned(), (12.0 * s) as u32, p.muted, lx, p.body_y + 8.0 * s);
+        self.put(r, scene, &view.duty_name, (22.0 * s) as u32, p.ink, lx, p.body_y + 32.0 * s);
+        if view.rows.is_empty() {
+            self.put(r, scene, &omsi_ui::tr("No duty on this run").into_owned(), (15.0 * s) as u32, p.ink, lx, p.body_y + 80.0 * s);
+        } else {
+            let row_h = 28.0 * s;
+            let top = p.body_y + 58.0 * s;
+            let fit = ((p.body_h - 70.0 * s) / row_h).floor() as usize;
+            let fit = fit.clamp(4, 16);
+            let focus = view.rows.iter().position(|row| matches!(row.state, crate::tablet::RowState::Now | crate::tablet::RowState::Next)).unwrap_or(0);
+            let (a, b, more) = crate::tablet::rows_in_view(view.rows.len(), focus, fit);
+            for (k, row) in view.rows[a..b].iter().enumerate() {
+                let cy = top + row_h * (k as f32 + 0.5);
+                let rect = [lx, cy - row_h * 0.5 + 2.0 * s, lx + left_w, cy + row_h * 0.5 - 2.0 * s];
+                if row.state == crate::tablet::RowState::Now {
+                    self.text.rounded(r, scene, rect, 6.0 * s, [28, 40, 54, 255]);
+                }
+                let ink = if row.state == crate::tablet::RowState::Done { p.muted } else { p.ink };
+                self.put(r, scene, &row.time, (13.0 * s) as u32, ink, lx + 8.0 * s, cy);
+                let line = if row.line.trim().is_empty() { "—".to_string() } else { row.line.clone() };
+                let lw = (self.text.width(&line, 12.0 * s) + 12.0 * s).clamp(28.0 * s, 56.0 * s);
+                let bx = lx + 62.0 * s;
+                self.text.rounded(r, scene, [bx, cy - 9.0 * s, bx + lw, cy + 9.0 * s], 4.0 * s, p.accent);
+                self.put(r, scene, &line, (12.0 * s) as u32, [18, 14, 8, 0], bx + 6.0 * s, cy);
+                let what = if row.detail.trim().is_empty() || row.detail.trim() == row.what.trim() { row.what.clone() } else { format!("{} → {}", row.what, row.detail) };
+                self.put(r, scene, &clip_to(&self.text, &what, 13.0 * s, left_w - 160.0 * s), (13.0 * s) as u32, ink, bx + lw + 8.0 * s, cy);
+                self.put_right(r, scene, &row.arrival, (12.0 * s) as u32, p.muted, lx + left_w - 8.0 * s, cy);
+            }
+            if more > 0 {
+                let more_t = omsi_ui::tr("+ {n} more trips").replace("{n}", &more.to_string());
+                self.put(r, scene, &more_t, (12.0 * s) as u32, p.muted, lx, top + row_h * (b - a) as f32 + 8.0 * s);
+            }
+        }
+        let card = [rx, p.body_y, rx + right_w, p.body_y + p.body_h];
+        self.tablet_card(r, scene, card, p);
+        let head = if view.stop_title.is_empty() { omsi_ui::tr("Stops").into_owned() } else { view.stop_title.clone() };
+        self.put(r, scene, &clip_to(&self.text, &head, 14.0 * s, right_w - 28.0 * s), (14.0 * s) as u32, p.ink, card[0] + 14.0 * s, card[1] + 22.0 * s);
+        if view.stops.is_empty() {
+            self.put(r, scene, &omsi_ui::tr("No duty on this run").into_owned(), (13.0 * s) as u32, p.muted, card[0] + 14.0 * s, card[1] + 56.0 * s);
+            return;
+        }
+        let row_h = 24.0 * s;
+        let fit = ((card[3] - card[1] - 48.0 * s) / row_h).floor() as usize;
+        let fit = fit.clamp(4, 20);
+        let focus = view.stops.iter().position(|s| s.mark == 1).unwrap_or(0);
+        let (a, b, more) = crate::tablet::rows_in_view(view.stops.len(), focus, fit);
+        for (k, stop) in view.stops[a..b].iter().enumerate() {
+            let cy = card[1] + 48.0 * s + row_h * (k as f32 + 0.5);
+            let col = match stop.mark {
+                0 => p.muted,
+                1 => [p.accent[0], p.accent[1], p.accent[2], 0],
+                _ => p.ink,
+            };
+            self.put(r, scene, &stop.time, (13.0 * s) as u32, col, card[0] + 14.0 * s, cy);
+            self.put(r, scene, &clip_to(&self.text, &stop.name, 13.0 * s, right_w - 90.0 * s), (13.0 * s) as u32, col, card[0] + 72.0 * s, cy);
+        }
+        if more > 0 {
+            let more_t = omsi_ui::tr("+ {n} more").replace("{n}", &more.to_string());
+            self.put(r, scene, &more_t, (12.0 * s) as u32, p.muted, card[0] + 14.0 * s, card[1] + 48.0 * s + row_h * (b - a) as f32);
+        }
+    }
+
+    fn tablet_vehicle(&mut self, r: &Renderer, scene: &mut Scene, view: &crate::tablet::TabletView, p: TabletPaint) {
+        let s = p.s;
+        let gap = 14.0 * s;
+        let left_w = (p.sw - p.pad * 2.0 - gap) * 0.56;
+        let lx = p.sx + p.pad;
+        let rx = lx + left_w + gap;
+        let right_w = p.sx + p.sw - p.pad - rx;
+        self.put(r, scene, &omsi_ui::tr("Vehicle").into_owned(), (12.0 * s) as u32, p.muted, lx, p.body_y + 8.0 * s);
+        let card = [lx, p.body_y + 28.0 * s, lx + left_w, p.body_y + p.body_h];
+        self.tablet_card(r, scene, card, p);
+        let inn = 16.0 * s;
+        if view.bus_nr.is_empty() && view.bus_name.is_empty() {
+            self.put(r, scene, &omsi_ui::tr("No bus taken").into_owned(), (18.0 * s) as u32, p.ink, card[0] + inn, card[1] + 48.0 * s);
+        } else {
+            let wagon = if view.bus_nr.is_empty() { view.bus_name.clone() } else { omsi_ui::tr("Wagon {n}").replace("{n}", &view.bus_nr) };
+            self.put(r, scene, &clip_to(&self.text, &wagon, 26.0 * s, left_w - inn * 2.0), (26.0 * s) as u32, p.ink, card[0] + inn, card[1] + 40.0 * s);
+            if !view.bus_name.is_empty() {
+                self.put(r, scene, &clip_to(&self.text, &view.bus_name, 14.0 * s, left_w - inn * 2.0), (14.0 * s) as u32, p.muted, card[0] + inn, card[1] + 68.0 * s);
+            }
+            let mut yb = card[1] + 108.0 * s;
+            let mut meters: Vec<(String, f32, [u8; 4])> = Vec::new();
+            if let Some(c) = view.condition {
+                meters.push((omsi_ui::tr("Condition").into_owned(), c, if c < 0.4 { p.orange } else { p.green }));
+            }
+            if let Some(t) = view.tank {
+                meters.push((omsi_ui::tr("Tank").into_owned(), t, if t < 0.15 { p.orange } else { p.blue }));
+            }
+            for (label, frac, col) in meters {
+                self.put(r, scene, &label, (13.0 * s) as u32, p.muted, card[0] + inn, yb);
+                self.put_right(r, scene, &format!("{:.0} %", frac * 100.0), (13.0 * s) as u32, p.ink, card[2] - inn, yb);
+                let track = [card[0] + inn, yb + 14.0 * s, card[2] - inn, yb + 22.0 * s];
+                self.text.rounded(r, scene, track, 3.0 * s, p.edge);
+                let fw = (track[2] - track[0]) * frac.clamp(0.0, 1.0);
+                if fw > 1.0 {
+                    self.text.rounded(r, scene, [track[0], track[1], track[0] + fw, track[3]], 3.0 * s, col);
+                }
+                yb += 44.0 * s;
+            }
+            if let Some(km) = view.km {
+                self.put(r, scene, &omsi_ui::tr("Kilometres").into_owned(), (13.0 * s) as u32, p.muted, card[0] + inn, yb);
+                self.put_right(r, scene, &format!("{} km", crate::tablet::km_text(km)), (16.0 * s) as u32, p.ink, card[2] - inn, yb);
+            }
+        }
+        let side = [rx, p.body_y + 28.0 * s, rx + right_w, p.body_y + p.body_h];
+        self.tablet_card(r, scene, side, p);
+        self.put(r, scene, &omsi_ui::tr("Depot").into_owned(), (12.0 * s) as u32, p.muted, side[0] + 16.0 * s, side[1] + 22.0 * s);
+        let place = if view.bus_line.is_empty() { omsi_ui::tr("In the depot").into_owned() } else { format!("{} {}", omsi_ui::tr("Line"), view.bus_line) };
+        self.put(r, scene, &clip_to(&self.text, &place, 20.0 * s, right_w - 32.0 * s), (20.0 * s) as u32, p.ink, side[0] + 16.0 * s, side[1] + 56.0 * s);
+        if view.condition.is_some_and(|c| c < 0.4) {
+            self.put(r, scene, &omsi_ui::tr("Workshop").into_owned(), (14.0 * s) as u32, [p.orange[0], p.orange[1], p.orange[2], 0], side[0] + 16.0 * s, side[1] + 96.0 * s);
+        }
+        if !view.depot.is_empty() {
+            self.put(r, scene, &clip_to(&self.text, &depot_short(&view.depot), 13.0 * s, right_w - 32.0 * s), (13.0 * s) as u32, p.muted, side[0] + 16.0 * s, side[1] + 130.0 * s);
+        }
+    }
+
+    fn tablet_yard(&mut self, r: &Renderer, scene: &mut Scene, view: &crate::tablet::TabletView, p: TabletPaint) {
+        let s = p.s;
+        self.put(r, scene, &omsi_ui::tr("Depot").into_owned(), (12.0 * s) as u32, p.muted, p.sx + p.pad, p.body_y + 8.0 * s);
+        let title = depot_short(&view.depot);
+        let title = if title.is_empty() { omsi_ui::tr("Depot").into_owned() } else { title };
+        self.put(r, scene, &clip_to(&self.text, &title, 22.0 * s, p.sw * 0.5), (22.0 * s) as u32, p.ink, p.sx + p.pad, p.body_y + 32.0 * s);
+        if view.fleet_remote {
+            self.put(r, scene, &omsi_ui::tr("The fleet is kept by the host.").into_owned(), (15.0 * s) as u32, p.muted, p.sx + p.pad, p.body_y + 72.0 * s);
+            return;
+        }
+        if view.yard.is_empty() {
+            self.put(r, scene, &omsi_ui::tr("No buses in the fleet").into_owned(), (15.0 * s) as u32, p.ink, p.sx + p.pad, p.body_y + 72.0 * s);
+            return;
+        }
+        let sum = omsi_ui::tr("{n} buses, {m} in the depot").replace("{n}", &view.yard.len().to_string()).replace("{m}", &view.yard_home.to_string());
+        self.put_right(r, scene, &sum, (13.0 * s) as u32, p.muted, p.sx + p.sw - p.pad, p.body_y + 32.0 * s);
+        let row_h = 36.0 * s;
+        let top = p.body_y + 64.0 * s;
+        let fit = ((p.body_h - 72.0 * s) / row_h).floor() as usize;
+        let fit = fit.clamp(3, 14);
+        let focus = view.yard.iter().position(|b| b.yours).unwrap_or(0);
+        let (a, b, more) = crate::tablet::rows_in_view(view.yard.len(), focus, fit);
+        let x0 = p.sx + p.pad;
+        let w = p.sw - p.pad * 2.0;
+        for (k, bus) in view.yard[a..b].iter().enumerate() {
+            let cy = top + row_h * (k as f32 + 0.5);
+            let rect = [x0, cy - row_h * 0.5 + 2.0 * s, x0 + w, cy + row_h * 0.5 - 2.0 * s];
+            if bus.yours {
+                self.text.rounded(r, scene, rect, 6.0 * s, [28, 40, 54, 255]);
+                self.text.rounded(r, scene, [rect[0], rect[1] + 6.0 * s, rect[0] + 3.0 * s, rect[3] - 6.0 * s], 1.5 * s, p.accent);
+            }
+            let wagon = omsi_ui::tr("Wagon {n}").replace("{n}", &bus.nr);
+            self.put(r, scene, &wagon, (14.0 * s) as u32, p.ink, x0 + 14.0 * s, cy - 7.0 * s);
+            self.put(r, scene, &clip_to(&self.text, &bus.name, 12.0 * s, w * 0.28), (12.0 * s) as u32, p.muted, x0 + 14.0 * s, cy + 9.0 * s);
+            self.put(r, scene, &clip_to(&self.text, &bus.place, 13.0 * s, w * 0.28), (13.0 * s) as u32, p.ink, x0 + w * 0.34, cy);
+            let cond = format!("{:.0} %", bus.condition * 100.0);
+            let col = if bus.workshop { [p.orange[0], p.orange[1], p.orange[2], 0] } else { p.ink };
+            self.put_right(r, scene, &cond, (13.0 * s) as u32, col, x0 + w * 0.78, cy);
+            self.put_right(r, scene, &bus.km, (13.0 * s) as u32, p.muted, x0 + w - 8.0 * s, cy);
+        }
+        if more > 0 {
+            let more_t = omsi_ui::tr("+ {n} more").replace("{n}", &more.to_string());
+            self.put(r, scene, &more_t, (12.0 * s) as u32, p.muted, x0, top + row_h * (b - a) as f32 + 6.0 * s);
+        }
+    }
+
+    fn tablet_desk(&mut self, r: &Renderer, scene: &mut Scene, view: &crate::tablet::TabletView, p: TabletPaint) {
+        let s = p.s;
+        let gap = 14.0 * s;
+        let left_w = (p.sw - p.pad * 2.0 - gap) * 0.48;
+        let lx = p.sx + p.pad;
+        let rx = lx + left_w + gap;
+        let right_w = p.sx + p.sw - p.pad - rx;
+        let left = [lx, p.body_y, lx + left_w, p.body_y + p.body_h];
+        self.tablet_card(r, scene, left, p);
+        let inn = 16.0 * s;
+        self.put(r, scene, &omsi_ui::tr("Current trip").into_owned(), (12.0 * s) as u32, p.muted, left[0] + inn, left[1] + 22.0 * s);
+        self.put(r, scene, &clip_to(&self.text, &view.duty_name, 22.0 * s, left_w - inn * 2.0), (22.0 * s) as u32, p.ink, left[0] + inn, left[1] + 52.0 * s);
+        if view.mode == crate::tablet::TabletMode::ClockIn {
+            self.put(r, scene, &omsi_ui::tr("Clock in on the shift ticket.").into_owned(), (13.0 * s) as u32, p.muted, left[0] + inn, left[1] + 84.0 * s);
+        } else if view.mode == crate::tablet::TabletMode::OnDuty {
+            let on = format!("{} · {}", view.duty_clock, omsi_ui::tr("so far"));
+            self.put(r, scene, &on, (13.0 * s) as u32, [p.accent[0], p.accent[1], p.accent[2], 0], left[0] + inn, left[1] + 84.0 * s);
+        }
+        self.put(r, scene, &omsi_ui::tr("Next stop").into_owned(), (12.0 * s) as u32, p.muted, left[0] + inn, left[1] + 124.0 * s);
+        if view.next_stop.is_empty() {
+            self.put(r, scene, &omsi_ui::tr("No duty on this run").into_owned(), (14.0 * s) as u32, p.ink, left[0] + inn, left[1] + 152.0 * s);
+        } else {
+            self.put(r, scene, &view.next_stop_time, (22.0 * s) as u32, p.ink, left[0] + inn, left[1] + 152.0 * s);
+            self.put(r, scene, &clip_to(&self.text, &view.next_stop, 16.0 * s, left_w - inn * 2.0), (16.0 * s) as u32, p.ink, left[0] + inn, left[1] + 184.0 * s);
+        }
+        if let Some(n) = &view.next {
+            let dest = if n.dest.trim().is_empty() { n.from.clone() } else { n.dest.clone() };
+            let towards = omsi_ui::tr("towards {where}").replace("{where}", &dest);
+            self.put(r, scene, &omsi_ui::tr("Next departure").into_owned(), (12.0 * s) as u32, p.muted, left[0] + inn, left[1] + 230.0 * s);
+            self.put(r, scene, &n.time, (18.0 * s) as u32, p.ink, left[0] + inn, left[1] + 258.0 * s);
+            self.put(r, scene, &clip_to(&self.text, &towards, 13.0 * s, left_w - inn * 2.0), (13.0 * s) as u32, p.muted, left[0] + inn, left[1] + 286.0 * s);
+        }
+        let right = [rx, p.body_y, rx + right_w, p.body_y + p.body_h];
+        self.tablet_card(r, scene, right, p);
+        self.put(r, scene, &omsi_ui::tr("Notices").into_owned(), (12.0 * s) as u32, p.muted, right[0] + inn, right[1] + 22.0 * s);
+        if view.notes.is_empty() {
+            self.put(r, scene, &omsi_ui::tr("All is well.").into_owned(), (15.0 * s) as u32, [p.green[0], p.green[1], p.green[2], 0], right[0] + inn, right[1] + 56.0 * s);
+            return;
+        }
+        let mut y = right[1] + 52.0 * s;
+        for note in view.notes.iter().take(8) {
+            if y > right[3] - 24.0 * s {
+                break;
+            }
+            let col = match note.level {
+                2 => p.orange,
+                1 => p.accent,
+                _ => p.blue,
+            };
+            self.text.rounded(r, scene, [right[0] + inn, y - 4.0 * s, right[0] + inn + 8.0 * s, y + 4.0 * s], 4.0 * s, col);
+            self.put(r, scene, &clip_to(&self.text, &note.text, 13.0 * s, right_w - inn * 2.0 - 20.0 * s), (13.0 * s) as u32, p.ink, right[0] + inn + 16.0 * s, y);
+            y += 32.0 * s;
+        }
+    }
+
+    fn tablet_tabs(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, tab: u8, sel: usize, items: &[(&str, &str)], rects: &mut [[f32; 4]], p: TabletPaint) {
+        let s = p.s;
+        let y0 = p.sy + p.sh - 56.0 * s;
+        self.text.rounded(r, scene, [p.sx + p.pad, y0, p.sx + p.sw - p.pad, y0 + 1.0], 0.0, p.edge);
+        let back_i = items.iter().position(|(id, _)| *id == "back");
+        let back = [p.sx + 8.0 * s, y0 + 8.0 * s, p.sx + 100.0 * s, p.sy + p.sh - 8.0 * s];
+        let back_over = f.cursor.0 >= back[0] && f.cursor.0 <= back[2] && f.cursor.1 >= back[1] && f.cursor.1 <= back[3];
+        let back_lit = back_over || back_i.is_some_and(|i| i == sel && f.menu_kbd);
+        if back_lit {
+            self.text.rounded(r, scene, back, 6.0 * s, [28, 40, 54, 255]);
+        }
+        let back_txt = format!("‹ {}", omsi_ui::tr("Back"));
+        self.put(r, scene, &back_txt, (13.0 * s) as u32, if back_lit { p.ink } else { p.muted }, back[0] + 8.0 * s, (back[1] + back[3]) * 0.5);
+        if let Some(i) = back_i {
+            rects[i] = back;
+        }
+        let tabs = [
+            (omsi_ui::tr("Shift ticket").into_owned(), "description"),
+            (omsi_ui::tr("Timetable").into_owned(), "schedule"),
+            (omsi_ui::tr("Vehicle").into_owned(), "directions_bus"),
+            (omsi_ui::tr("Depot").into_owned(), "home"),
+            (omsi_ui::tr("Control room").into_owned(), "chat"),
+        ];
+        let x0 = back[2] + 4.0 * s;
+        let tw = (p.sx + p.sw - 8.0 * s - x0) / tabs.len() as f32;
+        for (i, (name, icon)) in tabs.iter().enumerate() {
+            let a = x0 + tw * i as f32;
+            let rect = [a + 3.0 * s, y0 + 8.0 * s, a + tw - 3.0 * s, p.sy + p.sh - 8.0 * s];
+            let id = format!("tab {i}");
+            let idx = items.iter().position(|(act, _)| *act == id);
+            let over = f.cursor.0 >= rect[0] && f.cursor.0 <= rect[2] && f.cursor.1 >= rect[1] && f.cursor.1 <= rect[3];
+            let lit = over || idx.is_some_and(|k| k == sel && f.menu_kbd);
+            let on = tab == i as u8;
+            if on || lit {
+                self.text.rounded(r, scene, rect, 6.0 * s, [28, 40, 54, 255]);
+            }
+            if on {
+                self.text.rounded(r, scene, [rect[0] + 10.0 * s, rect[3] - 3.0 * s, rect[2] - 10.0 * s, rect[3]], 1.0 * s, p.accent);
+            }
+            let col = if on { [p.accent[0], p.accent[1], p.accent[2], 0] } else { p.muted };
+            let rgb = [col[0], col[1], col[2]];
+            let cx = (rect[0] + rect[2]) * 0.5;
+            let icon_px = (16.0 * s).round().clamp(12.0, 36.0) as u32;
+            self.text.icon(r, scene, icon, icon_px, rgb, [cx, rect[1] + 11.0 * s]);
+            let label = clip_to(&self.text, name, 12.0 * s, rect[2] - rect[0] - 8.0 * s);
+            let lw = self.text.width(&label, 12.0 * s);
+            self.put(r, scene, &label, (12.0 * s) as u32, col, cx - lw * 0.5, rect[3] - 11.0 * s);
+            if let Some(k) = idx {
+                rects[k] = rect;
+            }
+        }
+    }
+
     fn draw_menu(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame) {
         self.menu_rects.clear();
         self.menu_ctl.clear();
@@ -1461,6 +2299,12 @@ impl Ui {
             self.anim.clear();
             return;
         };
+        // the company tablet has its own picture (the shift ticket)
+        if f.menu_kind == MenuKind::Tablet {
+            self.draw_tablet(r, scene, f, sel, items);
+            self.menu_overlay_range = overlay_start..scene.overlays.len();
+            return;
+        }
         // a settings window has its own layout
         if f.menu_kind == MenuKind::Options && f.menu_tabs.is_some() {
             self.draw_settings(r, scene, f, sel, items);
@@ -2167,6 +3011,13 @@ fn wrap(tc: &TextCache, text: &str, px: f32, width: f32) -> Vec<String> {
 }
 
 /// `text` cut at the end to fit `width` pixels ("…").
+/// A depot path becomes its file name. A plain name stays as it is.
+fn depot_short(raw: &str) -> String {
+    let t = raw.trim();
+    let name = t.rsplit(['/', '\\']).next().unwrap_or(t);
+    name.trim_end_matches(".hof").trim_end_matches(".HOF").to_string()
+}
+
 fn clip_to(tc: &TextCache, text: &str, px: f32, width: f32) -> String {
     if tc.width(text, px) <= width {
         return text.to_string();

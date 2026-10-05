@@ -324,6 +324,35 @@ pub(crate) struct App {
     pub(crate) company_run_id: u64,
     /// The company's line for this frame's notes (made before the scene is borrowed).
     pub(crate) company_hud: Option<String>,
+    /// Clocked in for the company (F6): the shift runs, on foot and in the bus, until F6 again.
+    pub(crate) shift_on: bool,
+    /// The boss tries the driver view (F7): the account stays hidden. A friend in multiplayer
+    /// is a driver anyway.
+    pub(crate) as_driver: bool,
+    /// Seconds on the clock this shift.
+    pub(crate) shift_seconds: f64,
+    /// Career counters when this shift started, so the settlement can show what changed.
+    pub(crate) shift_snap: Option<crate::tablet::ShiftSnap>,
+    /// The settlement stays up after "Clock out" until the tablet is closed or confirmed.
+    pub(crate) tablet_after: bool,
+    /// Which tab of the tablet is shown (0 is the shift ticket).
+    pub(crate) tablet_tab: u8,
+    /// The shift just ended, for the settlement. Empty once the next shift starts.
+    pub(crate) shift_bill: Option<crate::tablet::ShiftBill>,
+    /// Fleet number of a company bus, by the vehicle's id for this session.
+    pub(crate) depot_fleet: Vec<(u64, u32)>,
+    /// A repair the mechanic has started: fleet number and seconds left. Not saved.
+    pub(crate) workshop_jobs: Vec<(u32, f32)>,
+    /// Depot entry points, once found, so a bus driven back can meet the mechanic.
+    pub(crate) depot_pts: Option<Vec<(f64, f64)>>,
+    /// The fleet number the workshop hint was shown for.
+    pub(crate) workshop_hint: Option<u32>,
+    /// The seated hint was shown, so it does not repeat every frame.
+    pub(crate) workshop_told: bool,
+    /// Mechanics standing this frame, so one whose bus is done can be removed.
+    pub(crate) workshop_shown: Vec<u32>,
+    /// How many colleagues are standing on the depot this frame.
+    pub(crate) colleague_n: usize,
     /// The duty's stops with their times as driven, kept in a file (`journey`).
     pub(crate) journey: Option<crate::journey::Journey>,
     /// How wet the roads are (0..1), built up by rain and dried by the sun.
@@ -377,10 +406,12 @@ impl App {
     /// (tickets and punctual stops less diesel, rent and fines, as the launcher will book it).
     pub(crate) fn company_line(&self) -> Option<String> {
         use omsi_launcher_lib::company::{money, Run};
-        // a friend's game: whose company it is and what it holds
+        // a friend, or the boss trying that view (F7): the shift and their own wage, not the account
+        if self.sees_as_driver() {
+            return self.driver_line();
+        }
         if self.company.is_none() {
-            let (short, balance) = self.remote_company.as_ref()?;
-            return Some(format!("{short} · {} {} · {}", omsi_ui::tr("Balance"), money(*balance), omsi_ui::tr("you drive for this company")));
+            return None;
         }
         let c = self.company.as_ref()?;
         let k = &self.career;
@@ -402,13 +433,52 @@ impl App {
         let r = c.price(&run).result().round();
         let name = if c.short.trim().is_empty() { c.name.clone() } else { c.short.clone() };
         Some(format!(
-            "{name} · {} {} · {} {}{}",
+            "{name} · {} {} · {} {}{}{}",
             omsi_ui::tr("Balance"),
             money(c.balance + r),
             omsi_ui::tr("this trip"),
             if r > 0.0 { "+" } else { "" },
-            money(r)
+            money(r),
+            self.shift_bit()
         ))
+    }
+
+    /// True when this player should not see the company account: a friend in the host's
+    /// session, or the boss who switched to the driver view with F7.
+    fn sees_as_driver(&self) -> bool {
+        self.as_driver || self.lan.as_ref().is_some_and(|l| l.role == omsi_net::Role::Client && self.remote_company.is_some())
+    }
+
+    /// The driver's line: the company name, the shift and the wage earned so far.
+    fn driver_line(&self) -> Option<String> {
+        use omsi_launcher_lib::company::{money, shift_pay, tuning};
+        let name = if let Some(c) = &self.company {
+            if c.short.trim().is_empty() { c.name.clone() } else { c.short.clone() }
+        } else {
+            self.remote_company.as_ref()?.0.clone()
+        };
+        let role = omsi_ui::tr("Driver");
+        if !self.shift_on {
+            return Some(format!("{name} · {role} · {}", omsi_ui::tr("F6 clocks in")));
+        }
+        let t = tuning();
+        let wage = shift_pay(self.shift_seconds, t.shift_minutes * 60.0, t.driver_wage, t.overtime_extra).wage;
+        Some(format!("{name} · {role}{} · {} {}", self.shift_bit(), omsi_ui::tr("Your wage"), money(wage)))
+    }
+
+    /// The shift clock for the company line, empty when the player is not clocked in.
+    fn shift_bit(&self) -> String {
+        if !self.shift_on {
+            return String::new();
+        }
+        let s = self.shift_seconds.max(0.0) as u64;
+        let clock = format!("{:02}:{:02}", s / 3600, (s % 3600) / 60);
+        let plan = omsi_launcher_lib::company::tuning().shift_minutes * 60.0;
+        if self.shift_seconds > plan {
+            format!(" · {} {clock} · {}", omsi_ui::tr("Duty time"), omsi_ui::tr("overtime"))
+        } else {
+            format!(" · {} {clock}", omsi_ui::tr("Duty time"))
+        }
     }
 
     #[cfg(windows)]
@@ -781,19 +851,49 @@ impl App {
                         log::info!("company {}: balance {:.0}, {} buses", c.name, c.balance, c.buses.len());
                     }
                     // its buses that drive no line wait on its depot (not in another's game)
+                    let mut left_the_bus = false;
                     if let Some(c) = self.company.clone().filter(|_| self.args.lan_join.is_none()) {
                         let at = self.player.as_ref().map(|p| p.vehicle.position);
                         if let Some((buses, name)) = crate::depot::park_company_buses(&self.args, &c, &w, &renderer, &mut scene, at) {
-                            if !buses.is_empty() {
-                                let n = buses.len().to_string();
-                                self.placed.extend(buses);
-                                let text = omsi_ui::tr("{n} company buses wait on the depot {name}. Get out (Ctrl+Shift+G), walk to the driver's door and press G").replace("{n}", &n).replace("{name}", &name);
+                            let parked = buses.len();
+                            for (bus, nr) in buses {
+                                self.depot_fleet.push((bus.uid, nr));
+                                self.placed.push(bus);
+                            }
+                            // "Start at the depot": step out of the bus just spawned, it stays parked
+                            if self.args.depot_start && self.player.is_some() {
+                                self.park_driven_and_walk();
+                                left_the_bus = true;
+                            }
+                            let n = parked + usize::from(left_the_bus);
+                            if n > 0 {
+                                let key = if left_the_bus {
+                                    "{n} company buses wait on the depot {name}. Walk to the driver's door and press G. F6 clocks in"
+                                } else {
+                                    "{n} company buses wait on the depot {name}. Get out (Ctrl+Shift+G), walk to the driver's door and press G. F6 clocks in"
+                                };
+                                let text = omsi_ui::tr(key).replace("{n}", &n.to_string()).replace("{name}", &name);
                                 self.service_msg = Some((text, 12.0));
                             }
                         } else if !c.buses.is_empty() {
-                            self.service_msg = Some((omsi_ui::tr("No depot of your company on this map: choose it in the launcher under Company").into_owned(), 8.0));
+                            if self.args.depot_start && self.player.is_some() {
+                                self.park_driven_and_walk();
+                                left_the_bus = true;
+                                self.service_msg = Some((omsi_ui::tr("Walk to the driver's door and press G to drive a bus").into_owned(), 12.0));
+                            } else {
+                                self.service_msg = Some((omsi_ui::tr("No depot of your company on this map: choose it in the launcher under Company").into_owned(), 8.0));
+                            }
                         }
                     }
+                    if self.args.depot_start && !left_the_bus && self.player.is_some() {
+                        self.park_driven_and_walk();
+                        self.service_msg = Some((omsi_ui::tr("Walk to the driver's door and press G to drive a bus").into_owned(), 12.0));
+                    }
+                    if let Some(uid) = self.player.as_ref().map(|p| p.uid) {
+                        let file = self.driven_bus_file();
+                        self.remember_company_bus(uid, &file);
+                    }
+                    self.args.depot_start = false;
                 }
                 // (and a player who joins another's game sees the host's people)
                 if self.args.passengers || self.args.lan_join.is_some() {

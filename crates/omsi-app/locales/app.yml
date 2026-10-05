@@ -23765,6 +23765,42 @@ _version: 2
 "You drive for the host's company:":
   de: "Du fährst für die Firma des Gastgebers:"
 
+"F6 clocks in":
+  de: "Mit F6 einstempeln"
+
+"Clocked in. F6 clocks out at the end of the shift":
+  de: "Eingestempelt. Mit F6 stempelst du am Ende der Schicht aus"
+
+"Clocked out. Under 10 minutes does not count as work time yet.":
+  de: "Ausgestempelt. Unter 10 Minuten zählt noch nicht als Arbeitszeit."
+
+"Clocked out. Wage {wage}.":
+  de: "Ausgestempelt. Lohn {wage}."
+
+"Clocked out. Wage {wage}, overtime {overtime}.":
+  de: "Ausgestempelt. Lohn {wage}, davon Überstunden {overtime}."
+
+"No company to clock in for":
+  de: "Keine Firma, für die du einstempeln kannst"
+
+"Your wage":
+  de: "Dein Lohn"
+
+"Driver view: no company account. F7 switches back to boss":
+  de: "Fahrer-Ansicht: kein Firmenkonto. Mit F7 zurück zum Chef"
+
+"Boss view: the company account is shown. F7 switches to the driver view":
+  de: "Chef-Ansicht: das Firmenkonto wird gezeigt. Mit F7 zur Fahrer-Ansicht"
+
+"You are a driver here. The company account stays hidden":
+  de: "Du bist hier Fahrer. Das Firmenkonto bleibt verborgen"
+
+"Duty time":
+  de: "Schicht"
+
+"overtime":
+  de: "Überstunden"
+
 "Share the company with friends in multiplayer":
   de: "Firma im Mehrspieler mit Freunden teilen"
 
@@ -23774,8 +23810,14 @@ _version: 2
 "Host a multiplayer session on the company's map: the friends who join see its account, and what they earn is booked here after the session.":
   de: "Hoste eine Mehrspieler-Sitzung auf der Karte der Firma: Deine Freunde sehen den Kontostand, und was sie verdienen, wird nach der Sitzung hier verbucht."
 
-"{n} company buses wait on the depot {name}. Get out (Ctrl+Shift+G), walk to the driver's door and press G":
-  de: "{n} Firmenbusse warten auf dem Betriebshof {name}. Aussteigen (Strg+Umschalt+G), zur Fahrertür laufen und G drücken"
+"{n} company buses wait on the depot {name}. Get out (Ctrl+Shift+G), walk to the driver's door and press G. F6 clocks in":
+  de: "{n} Firmenbusse warten auf dem Betriebshof {name}. Aussteigen (Strg+Umschalt+G), zur Fahrertür laufen und G drücken. Mit F6 einstempeln"
+
+"{n} company buses wait on the depot {name}. Walk to the driver's door and press G. F6 clocks in":
+  de: "{n} Firmenbusse warten auf dem Betriebshof {name}. Zur Fahrertür laufen und G drücken. Mit F6 einstempeln"
+
+"Walk to the driver's door and press G to drive a bus":
+  de: "Zur Fahrertür laufen und G drücken, um einen Bus zu fahren"
 
 "No depot of your company on this map: choose it in the launcher under Company":
   de: "Kein Betriebshof deiner Firma auf dieser Karte: wähle ihn im Launcher unter Unternehmen"
@@ -23788,3 +23830,219 @@ _version: 2
 
 "This map has no start point for the depot":
   de: "Diese Karte hat keinen Startpunkt für den Betriebshof"
+
+"Company tablet...":
+  de: "Firmentablet..."
+
+"Clock in":
+  de: "Einstempeln"
+
+"Clock out":
+  de: "Ausstempeln"
+
+"Starts":
+  de: "Beginn"
+
+"Planned length":
+  de: "Geplante Dauer"
+
+"Shift ticket":
+  de: "Schichtbeleg"
+
+"Next departure":
+  de: "Nächste Abfahrt"
+
+"in {n} min":
+  de: "in {n} Min"
+
+"of {plan}":
+  de: "von {plan}"
+
+"towards {where}":
+  de: "nach {where}"
+
+"Arrival":
+  de: "Ankunft"
+
+"Status":
+  de: "Status"
+
+"done":
+  de: "erledigt"
+
+"right now":
+  de: "jetzt"
+
+"as next":
+  de: "als Nächstes"
+
+"planned":
+  de: "geplant"
+
+"Free run":
+  de: "Freie Fahrt"
+
+"No duty on this run":
+  de: "Keine Linie geplant. Freie Fahrt."
+
+"No further departure":
+  de: "Keine weitere Abfahrt"
+
+"+ {n} more trips":
+  de: "+ {n} weitere Fahrten"
+
+"Vehicle":
+  de: "Fahrzeug"
+
+"Wagon {n}":
+  de: "Wagen {n}"
+
+"No bus taken":
+  de: "Kein Bus"
+
+"Tank":
+  de: "Tank"
+
+"Kilometres":
+  de: "Kilometer"
+
+"so far":
+  de: "bisher"
+
+"hourly wage":
+  de: "Stundenlohn"
+
+"full shift":
+  de: "ganze Schicht"
+
+"{on} of {all} stops":
+  de: "{on} von {all} Haltestellen"
+
+"No stops served yet":
+  de: "Noch keine Haltestelle"
+
+"Good morning":
+  de: "Guten Morgen"
+
+"Good afternoon":
+  de: "Guten Tag"
+
+"Good evening":
+  de: "Guten Abend"
+
+"Your duty today":
+  de: "Dein Dienst heute"
+
+"Run {n}":
+  de: "Umlauf {n}"
+
+"Trips":
+  de: "Fahrten"
+
+"{n} trips":
+  de: "{n} Fahrten"
+
+"{n} trips, {b} pause ({m} min)":
+  de: "{n} Fahrten · {b} Pause ({m} min)"
+
+"First departure":
+  de: "Erste Abfahrt"
+
+"Your bus is waiting":
+  de: "Dein Bus wartet"
+
+"Stall {n}":
+  de: "Platz {n}"
+
+"Yellow: your bus is on stall {n}.":
+  de: "Gelb markiert Wagen {n}. Nicht der echte Platz auf der Karte."
+
+"On foot, walk there and press G at the driver's door.":
+  de: "Zu Fuß hingehen, an der Fahrertür G drücken."
+
+"After clocking in, your duty time and your wage start.":
+  de: "Ab dem Einstempeln läuft deine Dienstzeit und dein Lohn."
+
+"Duty {name} ended":
+  de: "Dienst {name} beendet"
+
+"Good shift, {name}!":
+  de: "Gute Schicht, {name}!"
+
+"Driven":
+  de: "Gefahren"
+
+"{time} h overtime":
+  de: "{time} h Überstunden"
+
+"Your trips":
+  de: "Deine Fahrten"
+
+"Pay slip":
+  de: "Lohnzettel"
+
+"Shift settlement":
+  de: "Schichtabrechnung"
+
+"{time} h × {wage}":
+  de: "{time} h × {wage}"
+
+"Overtime {time} h (+{pct} %)":
+  de: "Überstunden {time} h (+{pct} %)"
+
+"Accidents":
+  de: "Unfälle"
+
+"Confirm clocking out":
+  de: "Ausstempeln bestätigen"
+
+"Control room":
+  de: "Leitstelle"
+
+"This page comes next.":
+  de: "Diese Seite kommt als Nächstes."
+
+"In the depot":
+  de: "Im Betriebshof"
+
+"Stops":
+  de: "Haltestellen"
+
+"Current trip":
+  de: "Aktuelle Fahrt"
+
+"Next stop":
+  de: "Nächste Haltestelle"
+
+"Clock in on the shift ticket.":
+  de: "Einstempeln geht auf dem Schichtbeleg."
+
+"The fleet is kept by the host.":
+  de: "Die Flotte liegt beim Host."
+
+"No buses in the fleet":
+  de: "Keine Busse in der Flotte"
+
+"{n} buses, {m} in the depot":
+  de: "{n} Busse, {m} im Betriebshof"
+
+"+ {n} more":
+  de: "+ {n} weitere"
+
+"The mechanic is at wagon {n}. Press G to start the repair ({time} s).":
+  de: "Der Mechaniker steht an Wagen {n}. Mit G startet die Reparatur ({time} s)."
+
+"Repair of wagon {n} started. About {time} s.":
+  de: "Reparatur von Wagen {n} läuft. Etwa {time} s."
+
+"Wagon {n} is still in the workshop. {time} s left.":
+  de: "Wagen {n} ist noch in der Werkstatt. Noch {time} s."
+
+"Wagon {n} is repaired. The workshop costs {cost}.":
+  de: "Wagen {n} ist fertig. Die Werkstatt kostet {cost}."
+
+"Wagon {n} needs the workshop ({pct} %). The mechanic stands at the front. Get out with Ctrl+Shift+G, then press G next to him.":
+  de: "Wagen {n} braucht die Werkstatt ({pct} %). Der Mechaniker steht vorn. Aussteigen: Strg+Umschalt+G, dann G bei ihm."
+
+"Wagon {n} is at {pct} %. The workshop starts under 40 %.":
+  de: "Wagen {n} ist bei {pct} %. Die Werkstatt kommt erst unter 40 %."

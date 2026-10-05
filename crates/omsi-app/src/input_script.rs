@@ -32,6 +32,8 @@ impl App {
         if let Some(mut p) = self.plugins.take() {
             p.finalize();
         }
+        // still clocked in: the shift is paid out (a friend's wage goes to the host)
+        self.clock_out_shift();
         // the bus company in multiplayer: the friends' runs the host still holds, and a
         // friend's last state of their run to the host
         self.write_friend_runs(None);
@@ -261,6 +263,12 @@ impl App {
             if self.game_menu.is_none() && self.placing_key(code, pressed) {
                 return;
             }
+            // the company tablet (F8): also while the menu is open, and on foot at the depot.
+            // Only while a company is on this map, so a bus that uses F8 keeps it otherwise.
+            if pressed && !repeat && code == KeyCode::F8 && self.editor.is_none() && (self.company.is_some() || self.remote_company.is_some()) {
+                self.toggle_tablet();
+                return;
+            }
             // the game menu: Escape opens it (and pauses, except in a LAN session, which
             // goes on for the others), and while it is open the keys are its own
             if self.game_menu.is_some() {
@@ -271,6 +279,17 @@ impl App {
             }
             // the object editor takes its keys first (Escape leaves it)
             if pressed && self.editor.is_some() && self.editor_key(code) {
+                return;
+            }
+            // the company shift: F6 clocks in and out (only while a company is on this map,
+            // so a bus that uses F6 keeps it otherwise)
+            if pressed && !repeat && code == KeyCode::F6 && self.editor.is_none() && (self.company.is_some() || self.remote_company.is_some()) {
+                self.toggle_company_shift();
+                return;
+            }
+            // F7: the boss tries the driver view (no account on screen) and switches back
+            if pressed && !repeat && code == KeyCode::F7 && self.editor.is_none() && self.company.is_some() {
+                self.toggle_driver_view();
                 return;
             }
             if pressed && !repeat && code == KeyCode::Escape {
@@ -1760,6 +1779,22 @@ impl App {
         self.menu_drag = None;
     }
 
+    /// F8: the company tablet (clock, wage, shift plan). A second press closes it.
+    pub(crate) fn toggle_tablet(&mut self) {
+        if matches!(self.list_kind, Some(crate::game_lists::ListKind::Tablet)) {
+            self.close_list();
+            self.close_game_menu();
+            return;
+        }
+        if self.game_menu.is_none() {
+            self.open_game_menu();
+        }
+        self.open_list(crate::game_lists::ListKind::Tablet);
+        // the shift clock, the wage and the time of day keep running while the ticket is open
+        // (the pause menu itself still stops the game: Escape goes back there)
+        self.paused = self.menu_prev_pause;
+    }
+
     /// Let go of every key the vehicle holds: the keyboard's driving keys and pedals, the
     /// vehicle keys of `Inputs/keyboard.cfg` (their `<trigger>_off` fires) and the
     /// Shift+number door buttons.
@@ -2062,6 +2097,8 @@ impl App {
 
     /// The open list is closed: back to the game menu.
     pub(crate) fn close_list(&mut self) {
+        self.tablet_after = false;
+        self.tablet_tab = 0;
         self.dropdown = None;
         if self.menu_edit_icao { if let Some(w)=self.window.as_ref(){w.set_ime_allowed(false);} }
         self.menu_edit_icao=false;
@@ -2170,9 +2207,17 @@ impl App {
                 if self.tours_list() {
                     self.open_list(crate::game_lists::ListKind::Lines);
                 } else {
+                    let tablet = matches!(self.list_kind, Some(crate::game_lists::ListKind::Tablet));
                     self.chooser = None;
                     self.admin_list = None;
                     self.list_kind = None;
+                    if tablet {
+                        self.tablet_after = false;
+                        self.tablet_tab = 0;
+                        if self.lan.is_none() {
+                            self.paused = true;
+                        }
+                    }
                 }
             }
             KeyCode::ArrowUp | KeyCode::KeyW => self.chooser = Some(self.chooser_next(sel, n - 1)),
@@ -2332,7 +2377,16 @@ impl App {
                     }
                 }
                 None if action != "back" && matches!(kind, crate::game_lists::ListKind::Tours(..) | crate::game_lists::ListKind::Numbers | crate::game_lists::ListKind::Destinations | crate::game_lists::ListKind::RouteNumbers | crate::game_lists::ListKind::Hofs | crate::game_lists::ListKind::Spots) => self.close_game_menu(),
-                None => self.menu_top = None,
+                None => {
+                    if matches!(kind, crate::game_lists::ListKind::Tablet) {
+                        self.tablet_after = false;
+                        self.tablet_tab = 0;
+                        if self.game_menu.is_some() && self.lan.is_none() {
+                            self.paused = true;
+                        }
+                    }
+                    self.menu_top = None;
+                }
             }
             return;
         }
@@ -2896,6 +2950,7 @@ impl App {
                 self.copy_server_code();
             }
             "admin" => self.open_list(crate::game_lists::ListKind::Admin),
+            "tablet" => self.open_list(crate::game_lists::ListKind::Tablet),
             "duty" => self.open_list(crate::game_lists::ListKind::Lines),
             "map" => {
                 self.close_game_menu();
@@ -4486,6 +4541,10 @@ impl crate::App {
         let mut at = 1;
         if self.on_foot.is_some() && self.player.is_some() {
             v.insert(at, ("tobus", "Back to my bus"));
+            at += 1;
+        }
+        if self.company.is_some() || self.remote_company.is_some() {
+            v.insert(at, ("tablet", "Company tablet..."));
             at += 1;
         }
         // without a bus of one's own: no line to drive

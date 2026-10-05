@@ -35,6 +35,7 @@ mod career;
 mod describe;
 mod company_lan;
 mod depot;
+mod tablet;
 mod editor;
 mod spline_editor;
 mod game_lists;
@@ -595,6 +596,20 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
         company_sync_t: 0.0,
         company_run_id: 0,
         company_hud: None,
+        shift_on: false,
+        as_driver: false,
+        shift_seconds: 0.0,
+        shift_snap: None,
+        tablet_after: false,
+        tablet_tab: 0,
+        shift_bill: None,
+        depot_fleet: Vec::new(),
+        workshop_jobs: Vec::new(),
+        depot_pts: None,
+        workshop_hint: None,
+        workshop_told: false,
+        workshop_shown: Vec::new(),
+        colleague_n: 0,
         journey: None,
         wetness: 0.0,
         cloud_drift: [0.0; 2],

@@ -17,11 +17,6 @@ use omsi_geometry::SplineCurve;
 use omsi_map::MapSpline;
 use std::collections::{HashMap, HashSet};
 
-/// `text` in the interface's language (the English text is the key, see `locales/app.yml`).
-fn tr(text: &str) -> String {
-    omsi_ui::tr(text).into_owned()
-}
-
 /// A tile by its grid coordinates.
 pub type TileKey = (i32, i32);
 
@@ -265,8 +260,8 @@ impl SplineEditor {
 
     /// Change the selected spline.
     pub fn apply(&mut self, edits: &mut Edits, op: &Op) -> Result<Applied, String> {
-        let (tile, id) = self.selected.ok_or_else(|| tr("Pick a road first: point at it and press Enter"))?;
-        let mut s = self.current(edits, tile, id).ok_or_else(|| tr("The road piece is gone"))?;
+        let (tile, id) = self.selected.ok_or("Pick a spline first (Enter, or a click)")?;
+        let mut s = self.current(edits, tile, id).ok_or("The spline picked is gone")?;
         let mut tiles = vec![tile];
         let mut msg = None;
         match op {
@@ -314,7 +309,7 @@ impl SplineEditor {
             Op::Delete => {
                 if Self::is_added(edits, tile, id) {
                     tiles.extend(self.remove_added(edits, tile, id));
-                    msg = Some(tr("New piece removed"));
+                    msg = Some(format!("New spline {id} taken away"));
                 } else {
                     let gone = !s.deleted;
                     s.deleted = gone;
@@ -326,20 +321,19 @@ impl SplineEditor {
             Op::Undo => {
                 if Self::is_added(edits, tile, id) {
                     tiles.extend(self.remove_added(edits, tile, id));
-                    msg = Some(tr("New piece removed"));
+                    msg = Some(format!("New spline {id} taken away"));
                 } else {
                     if let Some(e) = edits.get_mut(&tile) {
                         e.changed.remove(&id);
                     }
                     let back = self.current(edits, tile, id).unwrap_or(s);
                     tiles.extend(self.relink_neighbours(edits, tile, &back, false));
-                    msg = Some(tr("Undone: back as in the map"));
+                    msg = Some(format!("Spline {id}: as the map has it"));
                 }
             }
             Op::Continue => {
                 let (n, nt) = self.continued(edits, tile, s)?;
-                let _ = n;
-                msg = Some(tr("New piece added - it is selected now"));
+                msg = Some(format!("New spline {} - it is the one edited now", n));
                 self.selected = Some((nt, n));
             }
             Op::Attach => {
@@ -348,7 +342,7 @@ impl SplineEditor {
             Op::PullChain => {
                 let (moved, more) = self.pull_chain(edits, tile, s);
                 tiles.extend(more);
-                msg = Some(if moved == 0 { tr("Nothing after it to pull along") } else { format!("{moved} {}", tr("pieces pulled along")) });
+                msg = Some(if moved == 0 { "No spline after it to pull along".to_string() } else { format!("{moved} spline(s) after it pulled onto its end") });
             }
         }
         tiles.sort();
@@ -365,7 +359,7 @@ impl SplineEditor {
     /// it, else before its start when nothing comes before it, else beside it.
     fn continued(&mut self, edits: &mut Edits, tile: TileKey, mut s: MapSpline) -> Result<(i64, TileKey), String> {
         if s.deleted {
-            return Err(tr("This piece is deleted (Delete brings it back)"));
+            return Err("The spline is deleted (Delete brings it back)".into());
         }
         let c = self.curve(tile, &s);
         let mut n = s.clone();
@@ -439,7 +433,7 @@ impl SplineEditor {
                 .min_by(|a, b| a.0.total_cmp(&b.0))
                 .map(|(_, t, x)| (t, x))
         };
-        let (pt, mut p) = found.ok_or_else(|| tr("No road end within 15 m to connect to"))?;
+        let (pt, mut p) = found.ok_or("No spline before it (none ends within 15 m of its start)")?;
         let pc = self.curve(pt, &p);
         let mut tiles = Vec::new();
         let (at, heading, grad, cant) = if p.next_id == s.id || (p.next_id == 0 && p.prev_id != s.id) {
@@ -454,7 +448,7 @@ impl SplineEditor {
             // the two meet start to start: this one leaves the other's start backwards
             (pc.point_at(0.0), p.heading + 180.0, -pc.slope_at(0.0) * 100.0, -p.cant_start)
         } else {
-            return Err(tr("The piece before already goes on somewhere else"));
+            return Err(format!("Spline {} goes on into another spline, not into this one", p.id));
         };
         s.prev_id = p.id;
         s.pos = self.local(tile, at);
@@ -566,29 +560,36 @@ impl SplineEditor {
         }
     }
 
-    /// The selected spline and what it is like now, in plain words.
+    /// The selected spline and what it is like now.
     pub fn describe(&self, edits: &Edits) -> String {
-        let Some((tile, id)) = self.selected else { return tr("Spline editor: point at a road and press Enter (or click)") };
-        let Some(s) = self.current(edits, tile, id) else { return tr("The road piece is gone") };
+        let Some((tile, id)) = self.selected else { return "Spline editor: Enter (or a click) picks the spline in the middle of the view".into() };
+        let Some(s) = self.current(edits, tile, id) else { return format!("Spline {id}: gone") };
         let name = s.file.rsplit(['\\', '/']).next().unwrap_or(&s.file).to_string();
-        let head = format!("{} {id} ({name})", tr("Road piece"));
         if s.deleted {
-            return format!("{head}: {}", tr("deleted (Delete brings it back)"));
+            return format!("Spline {id} {name}: deleted (Delete brings it back)");
         }
         let bend = if s.radius == 0.0 {
-            tr("straight")
+            "straight".to_string()
         } else {
-            format!("{} ({:.0} m)", tr(if s.radius > 0.0 { "curve right" } else { "curve left" }), s.radius.abs())
+            format!("radius {:.0} m {}", s.radius.abs(), if s.radius > 0.0 { "right" } else { "left" })
         };
-        let slope = (s.grad_start + s.grad_end) / 2.0;
+        let link = |l: i64| if l == 0 { "-".to_string() } else { l.to_string() };
         let state = if Self::is_added(edits, tile, id) {
-            format!(" · {}", tr("new"))
+            " (new)"
         } else if edits.get(&tile).is_some_and(|e| e.changed.contains_key(&id)) {
-            format!(" · {}", tr("changed"))
+            " (edited)"
         } else {
-            String::new()
+            ""
         };
-        format!("{head}: {:.0} m · {bend} · {} {:.1} %{state}", s.length, tr("slope"), slope)
+        format!(
+            "Spline {id} {name}{state}: {:.1} m, {bend}, gradient {:.1} / {:.1} %, height {:.2} m, joined {} < > {}",
+            s.length,
+            s.grad_start,
+            s.grad_end,
+            s.pos[2],
+            link(s.prev_id),
+            link(s.next_id)
+        )
     }
 }
 
@@ -657,7 +658,7 @@ mod tests {
         assert_eq!(ed.current(&edits, T, 1).unwrap().radius, 0.0);
         ed.apply(&mut edits, &Op::Curve(-1.0)).unwrap();
         assert_eq!(ed.current(&edits, T, 1).unwrap().radius, -MIN_RADIUS);
-        assert!(ed.describe(&edits).contains("changed"));
+        assert!(ed.describe(&edits).contains("(edited)"));
         ed.apply(&mut edits, &Op::Undo).unwrap();
         assert_eq!(ed.current(&edits, T, 1).unwrap(), ed.base[&T][0]);
         assert!(edits[&T].changed.is_empty());
@@ -746,7 +747,7 @@ mod tests {
         ed.apply(&mut edits, &Op::Length(10.0)).unwrap();
         ed.apply(&mut edits, &Op::Curve(0.02)).unwrap();
         let a = ed.apply(&mut edits, &Op::PullChain).unwrap();
-        assert!(a.msg.starts_with("1 piece"), "{}", a.msg);
+        assert!(a.msg.starts_with("1 spline"), "{}", a.msg);
         let first = ed.current(&edits, T, 1).unwrap();
         let second = ed.current(&edits, T, 2).unwrap();
         let c0 = ed.curve(T, &first);
