@@ -35,6 +35,7 @@ mod career;
 mod describe;
 mod company_lan;
 mod depot;
+mod dispatch;
 mod tablet;
 mod editor;
 mod spline_editor;
@@ -596,6 +597,7 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
         company_sync_t: 0.0,
         company_run_id: 0,
         company_hud: None,
+        dispo: Default::default(),
         shift_on: false,
         as_driver: false,
         shift_seconds: 0.0,

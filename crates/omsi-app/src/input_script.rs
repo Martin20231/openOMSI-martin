@@ -728,6 +728,11 @@ impl App {
             }
             return;
         }
+        // the dispatcher's plan, asks and answers (`dispatch`)
+        if let Some(rest) = text.strip_prefix("dispo ") {
+            self.dispatch_command(from, rest);
+            return;
+        }
         crate::admin::command(self, from, text);
     }
 

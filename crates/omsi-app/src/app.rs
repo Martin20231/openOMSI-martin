@@ -324,6 +324,8 @@ pub(crate) struct App {
     pub(crate) company_run_id: u64,
     /// The company's line for this frame's notes (made before the scene is borrowed).
     pub(crate) company_hud: Option<String>,
+    /// The dispatcher in multiplayer: roles, the duties handed out, an ask (see `dispatch`).
+    pub(crate) dispo: crate::dispatch::Dispatch,
     /// Clocked in for the company (F6): the shift runs, on foot and in the bus, until F6 again.
     pub(crate) shift_on: bool,
     /// The boss tries the driver view (F7): the account stays hidden. A friend in multiplayer

@@ -1567,6 +1567,7 @@ impl Ui {
                 self.tablet_settlement(r, scene, f, view, sel, items, &mut rects, paint);
             }
             self.tablet_tabs(r, scene, f, view.tab, sel, items, &mut rects, paint);
+            self.tablet_request(r, scene, f, view, sel, items, &mut rects, paint);
             self.menu_rects = rects;
             return;
         }
@@ -1575,9 +1576,13 @@ impl Ui {
                 1 => self.tablet_timetable(r, scene, view, paint),
                 2 => self.tablet_vehicle(r, scene, view, paint),
                 3 => self.tablet_yard(r, scene, view, paint),
-                _ => self.tablet_desk(r, scene, view, paint),
+                _ => match view.board.as_ref() {
+                    Some(b) => self.tablet_board(r, scene, f, b, sel, items, &mut rects, paint),
+                    None => self.tablet_desk(r, scene, view, paint),
+                },
             }
             self.tablet_tabs(r, scene, f, view.tab, sel, items, &mut rects, paint);
+            self.tablet_request(r, scene, f, view, sel, items, &mut rects, paint);
             self.menu_rects = rects;
             return;
         }
@@ -1776,7 +1781,228 @@ impl Ui {
             self.put(r, scene, &omsi_ui::tr("No stops served yet").into_owned(), (13.0 * s) as u32, muted, punct[0] + inn, punct[1] + 48.0 * s);
         }
         self.tablet_tabs(r, scene, f, view.tab, sel, items, &mut rects, paint);
+        self.tablet_request(r, scene, f, view, sel, items, &mut rects, paint);
         self.menu_rects = rects;
+    }
+
+    /// A button of the tablet that answers to the list line `id`: lit under the mouse and
+    /// when chosen by keys; returns whether it is there (its line is in the list).
+    #[allow(clippy::too_many_arguments)]
+    fn tablet_button(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, sel: usize, items: &[(&str, &str)], rects: &mut [[f32; 4]], id: &str, rect: [f32; 4], label: &str, fill: [u8; 4], ink: [u8; 4], px: f32) -> bool {
+        let idx = items.iter().position(|(act, _)| *act == id);
+        let over = f.cursor.0 >= rect[0] && f.cursor.0 <= rect[2] && f.cursor.1 >= rect[1] && f.cursor.1 <= rect[3];
+        let lit = over || idx.is_some_and(|i| i == sel && f.menu_kbd);
+        self.text.rounded(r, scene, rect, 6.0 * (px / 13.0).max(0.5), if lit { mix(fill, [255, 255, 255, 255], 0.16) } else { fill });
+        let text = clip_to(&self.text, label, px, (rect[2] - rect[0] - 8.0).max(8.0));
+        let tw = self.text.width(&text, px);
+        self.put(r, scene, &text, px as u32, ink, (rect[0] + rect[2] - tw) * 0.5, (rect[1] + rect[3]) * 0.5);
+        if let Some(i) = idx {
+            rects[i] = rect;
+        }
+        idx.is_some()
+    }
+
+    /// The control room (the tablet's last tab) of the boss and the dispatcher: the players
+    /// on the left, the duties of a line in the middle, handing the picked one out on the right.
+    #[allow(clippy::too_many_arguments)]
+    fn tablet_board(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, b: &crate::dispatch::BoardView, sel: usize, items: &[(&str, &str)], rects: &mut [[f32; 4]], p: TabletPaint) {
+        use crate::dispatch::{AssignState, RowMark};
+        let s = p.s;
+        let gap = 12.0 * s;
+        let inn = 14.0 * s;
+        let inner_w = p.sw - p.pad * 2.0;
+        let left_w = (inner_w * 0.27).round();
+        let right_w = (inner_w * 0.27).round();
+        let lx = p.sx + p.pad;
+        let mx = lx + left_w + gap;
+        let mid_w = inner_w - left_w - right_w - gap * 2.0;
+        let rx = mx + mid_w + gap;
+        let (top, bottom) = (p.body_y, p.body_y + p.body_h);
+        let txt = |c: [u8; 4]| [c[0], c[1], c[2], 0];
+        let dark = [18, 14, 8, 0];
+        let raised = [28, 40, 54, 255];
+        // left: the players, their role and duty; the boss names the dispatcher
+        let left = [lx, top, lx + left_w, bottom];
+        self.tablet_card(r, scene, left, p);
+        self.put(r, scene, &omsi_ui::tr("Drivers").into_owned(), (12.0 * s) as u32, p.muted, left[0] + inn, top + 20.0 * s);
+        let row_h = 58.0 * s;
+        for (k, pl) in b.players.iter().enumerate() {
+            let y0 = top + 38.0 * s + row_h * k as f32;
+            if y0 + row_h > bottom - 8.0 * s {
+                break;
+            }
+            self.text.rounded(r, scene, [left[0] + 8.0 * s, y0, left[2] - 8.0 * s, y0 + row_h - 6.0 * s], 8.0 * s, [17, 26, 37, 255]);
+            let (role, role_c) = match pl.role {
+                0 => (omsi_ui::tr("Boss").into_owned(), p.accent),
+                1 => (omsi_ui::tr("Dispatcher").into_owned(), p.blue),
+                _ => (omsi_ui::tr("Driver").into_owned(), p.muted),
+            };
+            let role_w = self.text.width(&role, 11.0 * s);
+            self.put_right(r, scene, &role, (11.0 * s) as u32, txt(role_c), left[2] - inn, y0 + 15.0 * s);
+            let name = if pl.me { format!("{} ({})", pl.name, omsi_ui::tr("you")) } else { pl.name.clone() };
+            let name = clip_to(&self.text, &name, 14.0 * s, left_w - inn * 2.0 - role_w - 10.0 * s);
+            self.put(r, scene, &name, (14.0 * s) as u32, p.ink, left[0] + inn, y0 + 15.0 * s);
+            let doing_c = if pl.doing == omsi_ui::tr("free") { txt(p.orange) } else { txt(p.green) };
+            let doing_w = if b.chef && !pl.me { left_w - inn * 2.0 - 104.0 * s } else { left_w - inn * 2.0 };
+            let doing = clip_to(&self.text, &pl.doing, 12.0 * s, doing_w);
+            self.put(r, scene, &doing, (12.0 * s) as u32, doing_c, left[0] + inn, y0 + 36.0 * s);
+            if b.chef && !pl.me {
+                let label = if pl.role == 1 { omsi_ui::tr("Make driver") } else { omsi_ui::tr("Make dispatcher") };
+                let btn = [left[2] - inn - 98.0 * s, y0 + 26.0 * s, left[2] - inn, y0 + 46.0 * s];
+                self.tablet_button(r, scene, f, sel, items, rects, &format!("drole {}", pl.id), btn, &label, raised, p.ink, 11.0 * s);
+            }
+        }
+        // middle: the line's duties
+        let mid = [mx, top, mx + mid_w, bottom];
+        self.tablet_card(r, scene, mid, p);
+        let mut cx = mx + inn;
+        for (i, l) in b.lines.iter().enumerate() {
+            let label = format!("{} {l}", omsi_ui::tr("Line"));
+            let w = self.text.width(&label, 12.0 * s) + 20.0 * s;
+            if cx + w > mid[2] - inn {
+                break;
+            }
+            let on = *l == b.line;
+            let (fill, ink) = if on { (p.accent, dark) } else { (raised, p.muted) };
+            self.tablet_button(r, scene, f, sel, items, rects, &format!("dline {i}"), [cx, top + 12.0 * s, cx + w, top + 36.0 * s], &label, fill, ink, 12.0 * s);
+            cx += w + 6.0 * s;
+        }
+        let cols = [mx + inn, mx + inn + 86.0 * s, mx + inn + 196.0 * s, mid[2] - inn];
+        let head_y = top + 56.0 * s;
+        for (i, h) in ["Duty", "Time", "Driver"].iter().enumerate() {
+            self.put(r, scene, &omsi_ui::tr(h).into_owned(), (11.0 * s) as u32, p.muted, cols[i], head_y);
+        }
+        self.put_right(r, scene, &omsi_ui::tr("Status").into_owned(), (11.0 * s) as u32, p.muted, cols[3], head_y);
+        let rows_y = head_y + 14.0 * s;
+        let rh = 32.0 * s;
+        let fit = (((bottom - 40.0 * s) - rows_y) / rh).floor().max(1.0) as usize;
+        let n = b.rows.len();
+        let first = crate::dispatch::clamp_scroll(b.scroll, n, fit);
+        if n == 0 {
+            self.put(r, scene, &omsi_ui::tr("No duties on this line today").into_owned(), (14.0 * s) as u32, p.muted, cols[0], rows_y + 30.0 * s);
+        }
+        for (k, row) in b.rows.iter().enumerate().skip(first).take(fit) {
+            let y0 = rows_y + rh * (k - first) as f32;
+            let rect = [mx + 6.0 * s, y0 + 2.0 * s, mid[2] - 6.0 * s, y0 + rh - 2.0 * s];
+            let id = format!("drow {k}");
+            let idx = items.iter().position(|(act, _)| *act == id);
+            let over = f.cursor.0 >= rect[0] && f.cursor.0 <= rect[2] && f.cursor.1 >= rect[1] && f.cursor.1 <= rect[3];
+            let lit = over || idx.is_some_and(|i| i == sel && f.menu_kbd);
+            if row.picked || lit {
+                self.text.rounded(r, scene, rect, 6.0 * s, raised);
+            }
+            if row.picked {
+                self.text.rounded(r, scene, [rect[0], rect[1] + 6.0 * s, rect[0] + 3.0 * s, rect[3] - 6.0 * s], 1.5 * s, p.accent);
+            }
+            if let Some(i) = idx {
+                rects[i] = rect;
+            }
+            let cy = (rect[1] + rect[3]) * 0.5;
+            self.put(r, scene, &row.name, (14.0 * s) as u32, p.ink, cols[0], cy);
+            self.put(r, scene, &row.time, (12.0 * s) as u32, p.muted, cols[1], cy);
+            let (label, c) = match row.mark {
+                RowMark::Open => (omsi_ui::tr("open"), p.orange),
+                RowMark::Asked => (omsi_ui::tr("asked"), p.blue),
+                RowMark::Taken => (omsi_ui::tr("taken"), p.green),
+                RowMark::Declined => (omsi_ui::tr("declined"), p.orange),
+                RowMark::Driving => (omsi_ui::tr("on the road"), p.green),
+            };
+            let lw = self.text.width(&label, 11.0 * s) + 16.0 * s;
+            let chip = [cols[3] - lw, cy - 10.0 * s, cols[3], cy + 10.0 * s];
+            self.text.rounded(r, scene, chip, 10.0 * s, mix(c, p.card, 0.78));
+            self.put(r, scene, &label, (11.0 * s) as u32, txt(c), chip[0] + 8.0 * s, cy);
+            let driver = if row.driver.is_empty() { "—".to_string() } else { row.driver.clone() };
+            let driver = clip_to(&self.text, &driver, 13.0 * s, (chip[0] - 8.0 * s - cols[2]).max(20.0 * s));
+            self.put(r, scene, &driver, (13.0 * s) as u32, if row.driver.is_empty() { p.muted } else { p.ink }, cols[2], cy);
+        }
+        if n > fit {
+            let shown = omsi_ui::tr("{a}–{b} of {n}").replace("{a}", &(first + 1).to_string()).replace("{b}", &(first + fit).min(n).to_string()).replace("{n}", &n.to_string());
+            self.put(r, scene, &shown, (12.0 * s) as u32, p.muted, cols[0], bottom - 20.0 * s);
+            let up = [mid[2] - inn - 76.0 * s, bottom - 32.0 * s, mid[2] - inn - 40.0 * s, bottom - 8.0 * s];
+            let down = [mid[2] - inn - 36.0 * s, bottom - 32.0 * s, mid[2] - inn, bottom - 8.0 * s];
+            self.tablet_button(r, scene, f, sel, items, rects, "dup", up, "▲", raised, p.ink, 12.0 * s);
+            self.tablet_button(r, scene, f, sel, items, rects, "ddown", down, "▼", raised, p.ink, 12.0 * s);
+        }
+        // right: hand the picked duty out
+        let right = [rx, top, rx + right_w, bottom];
+        self.tablet_card(r, scene, right, p);
+        self.put(r, scene, &omsi_ui::tr("Hand out duty").into_owned(), (12.0 * s) as u32, p.muted, right[0] + inn, top + 20.0 * s);
+        let Some(pick) = b.pick.as_ref() else {
+            let hint = omsi_ui::tr("Pick a duty in the list").into_owned();
+            self.put(r, scene, &clip_to(&self.text, &hint, 13.0 * s, right_w - inn * 2.0), (13.0 * s) as u32, p.muted, right[0] + inn, top + 52.0 * s);
+            return;
+        };
+        self.put(r, scene, &pick.name, (24.0 * s) as u32, p.ink, right[0] + inn, top + 52.0 * s);
+        self.put(r, scene, &pick.time, (12.0 * s) as u32, p.muted, right[0] + inn, top + 76.0 * s);
+        self.put(r, scene, &omsi_ui::tr("Driver").into_owned(), (11.0 * s) as u32, p.muted, right[0] + inn, top + 102.0 * s);
+        let oh = 34.0 * s;
+        let mut y = top + 114.0 * s;
+        for pl in &b.players {
+            if y + oh > bottom - 56.0 * s {
+                break;
+            }
+            let rect = [right[0] + inn, y, right[2] - inn, y + oh - 4.0 * s];
+            let state = pick.holder.filter(|h| h.0 == pl.id).map(|h| h.1);
+            let fill = if state.is_some() { mix(p.accent, p.card, 0.8) } else { raised };
+            let id = format!("dgive {}", pl.id);
+            let idx = items.iter().position(|(act, _)| *act == id);
+            let over = f.cursor.0 >= rect[0] && f.cursor.0 <= rect[2] && f.cursor.1 >= rect[1] && f.cursor.1 <= rect[3];
+            let lit = over || idx.is_some_and(|i| i == sel && f.menu_kbd);
+            self.text.rounded(r, scene, rect, 6.0 * s, if lit { mix(fill, [255, 255, 255, 255], 0.12) } else { fill });
+            if let Some(i) = idx {
+                rects[i] = rect;
+            }
+            let cy = (rect[1] + rect[3]) * 0.5;
+            let tag = match state {
+                Some(AssignState::Asked) => omsi_ui::tr("asked").into_owned(),
+                Some(AssignState::Taken) => omsi_ui::tr("taken").into_owned(),
+                Some(AssignState::Declined) => omsi_ui::tr("declined").into_owned(),
+                None => pl.doing.clone(),
+            };
+            let tw = self.text.width(&tag, 11.0 * s);
+            let tag_c = if state.is_some() { txt(p.accent) } else { p.muted };
+            self.put_right(r, scene, &clip_to(&self.text, &tag, 11.0 * s, (rect[2] - rect[0]) * 0.45), (11.0 * s) as u32, tag_c, rect[2] - 8.0 * s, cy);
+            let name = clip_to(&self.text, &pl.name, 13.0 * s, (rect[2] - rect[0]) - tw.min((rect[2] - rect[0]) * 0.45) - 24.0 * s);
+            self.put(r, scene, &name, (13.0 * s) as u32, p.ink, rect[0] + 10.0 * s, cy);
+            y += oh;
+        }
+        if pick.holder.is_some() {
+            let btn = [right[0] + inn, bottom - 48.0 * s, right[2] - inn, bottom - 14.0 * s];
+            self.tablet_button(r, scene, f, sel, items, rects, "dfree", btn, &omsi_ui::tr("Take back"), raised, p.ink, 13.0 * s);
+        } else {
+            let hint = omsi_ui::tr("A click on a driver asks him on his tablet").into_owned();
+            self.put(r, scene, &clip_to(&self.text, &hint, 11.0 * s, right_w - inn * 2.0), (11.0 * s) as u32, p.muted, right[0] + inn, bottom - 24.0 * s);
+        }
+    }
+
+    /// The ask of the control room, over whatever the tablet shows: take the duty or not.
+    #[allow(clippy::too_many_arguments)]
+    fn tablet_request(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, view: &crate::tablet::TabletView, sel: usize, items: &[(&str, &str)], rects: &mut [[f32; 4]], p: TabletPaint) {
+        let Some(q) = view.request.as_ref() else { return };
+        let s = p.s;
+        // (the rest stays visible, darker; clicks beside the card still reach it)
+        self.text.rounded(r, scene, [p.sx, p.sy, p.sx + p.sw, p.sy + p.sh], 16.0 * s, [8, 12, 17, 200]);
+        let (w, h) = (460.0 * s, 300.0 * s);
+        let x0 = p.sx + (p.sw - w) * 0.5;
+        let y0 = p.sy + (p.sh - h) * 0.5;
+        self.text.shadow(r, scene, [x0, y0, x0 + w, y0 + h], 18.0 * s, 20.0 * s, 10.0 * s, 150);
+        self.text.rounded(r, scene, [x0 - 1.0, y0 - 1.0, x0 + w + 1.0, y0 + h + 1.0], 16.0 * s, [58, 74, 94, 255]);
+        self.text.rounded(r, scene, [x0, y0, x0 + w, y0 + h], 16.0 * s, p.card);
+        let inn = 24.0 * s;
+        let from = omsi_ui::tr("Control room · {who}").replace("{who}", &q.by);
+        self.put(r, scene, &clip_to(&self.text, &from, 12.0 * s, w - inn * 2.0), (12.0 * s) as u32, [p.blue[0], p.blue[1], p.blue[2], 0], x0 + inn, y0 + 28.0 * s);
+        self.put(r, scene, &omsi_ui::tr("New duty for you").into_owned(), (22.0 * s) as u32, p.ink, x0 + inn, y0 + 58.0 * s);
+        let facts = [(omsi_ui::tr("Duty").into_owned(), q.duty.clone()), (omsi_ui::tr("Starts").into_owned(), q.start.clone()), (omsi_ui::tr("Ends").into_owned(), q.end.clone())];
+        for (i, (k, v)) in facts.iter().enumerate() {
+            let cy = y0 + 104.0 * s + 34.0 * s * i as f32;
+            self.put(r, scene, k, (14.0 * s) as u32, p.muted, x0 + inn, cy);
+            self.put_right(r, scene, v, (14.0 * s) as u32, p.ink, x0 + w - inn, cy);
+            self.text.rounded(r, scene, [x0 + inn, cy + 16.0 * s, x0 + w - inn, cy + 17.0 * s], 0.0, p.edge);
+        }
+        let bw = (w - inn * 2.0 - 12.0 * s) * 0.5;
+        let by = y0 + h - inn - 44.0 * s;
+        self.tablet_button(r, scene, f, sel, items, rects, "ddecline", [x0 + inn, by, x0 + inn + bw, by + 44.0 * s], &omsi_ui::tr("Decline"), [28, 40, 54, 255], p.ink, 15.0 * s);
+        self.tablet_button(r, scene, f, sel, items, rects, "daccept", [x0 + w - inn - bw, by, x0 + w - inn, by + 44.0 * s], &omsi_ui::tr("Accept"), p.accent, [18, 14, 8, 0], 15.0 * s);
     }
 
     fn tablet_card(&mut self, r: &Renderer, scene: &mut Scene, rect: [f32; 4], p: TabletPaint) {

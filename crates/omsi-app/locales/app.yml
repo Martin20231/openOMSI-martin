@@ -24046,3 +24046,96 @@ _version: 2
 
 "Wagon {n} is at {pct} %. The workshop starts under 40 %.":
   de: "Wagen {n} ist bei {pct} %. Die Werkstatt kommt erst unter 40 %."
+
+"Me":
+  de: "Ich"
+
+"Player":
+  de: "Spieler"
+
+"free":
+  de: "frei"
+
+"You are the dispatcher now: the control room is on the tablet (F8)":
+  de: "Du bist jetzt Disponent: Die Leitstelle ist im Tablet (F8)"
+
+"You are a driver again":
+  de: "Du bist wieder Fahrer"
+
+"New duty from the control room: {duty}. The tablet (F8) asks you":
+  de: "Neuer Dienst von der Leitstelle: {duty}. Das Tablet (F8) fragt dich"
+
+"{who} takes duty {duty}":
+  de: "{who} übernimmt Dienst {duty}"
+
+"{who} declines duty {duty}":
+  de: "{who} lehnt Dienst {duty} ab"
+
+"{who} is the dispatcher now":
+  de: "{who} ist jetzt Disponent"
+
+"No dispatcher: you hand out the duties":
+  de: "Kein Disponent: Du teilst die Dienste selbst ein"
+
+"Accept":
+  de: "Annehmen"
+
+"Decline":
+  de: "Ablehnen"
+
+"Take back":
+  de: "Zuteilung lösen"
+
+"Boss":
+  de: "Chef"
+
+"Dispatcher":
+  de: "Disponent"
+
+"you":
+  de: "du"
+
+"Make driver":
+  de: "Zum Fahrer machen"
+
+"Make dispatcher":
+  de: "Zum Disponenten"
+
+"No duties on this line today":
+  de: "Heute keine Dienste auf dieser Linie"
+
+"open":
+  de: "offen"
+
+"asked":
+  de: "angefragt"
+
+"taken":
+  de: "angenommen"
+
+"declined":
+  de: "abgelehnt"
+
+"on the road":
+  de: "unterwegs"
+
+"{a}–{b} of {n}":
+  de: "{a}–{b} von {n}"
+
+"Hand out duty":
+  de: "Dienst zuteilen"
+
+"Pick a duty in the list":
+  de: "Wähle links einen Dienst aus"
+
+"A click on a driver asks him on his tablet":
+  de: "Ein Klick auf einen Fahrer fragt ihn auf seinem Tablet"
+
+"Control room · {who}":
+  de: "Leitstelle · {who}"
+
+"New duty for you":
+  de: "Neuer Dienst für dich"
+
+"Ends":
+  de: "Ende"

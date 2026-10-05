@@ -153,6 +153,10 @@ pub(crate) struct TabletView {
     pub next_stop: String,
     pub next_stop_time: String,
     pub notes: Vec<DeskNote>,
+    /// The control room of the boss and the dispatcher in multiplayer (the last tab).
+    pub board: Option<crate::dispatch::BoardView>,
+    /// A duty the control room asks this player to drive.
+    pub request: Option<crate::dispatch::RequestView>,
 }
 
 /// One stop of the trip under way.
@@ -598,6 +602,8 @@ pub(crate) fn tablet_view(app: &App) -> TabletView {
         next_stop,
         next_stop_time,
         notes,
+        board: if app.tablet_tab == 4 { crate::dispatch::board_view(app) } else { None },
+        request: crate::dispatch::request_view(app),
     }
 }
 

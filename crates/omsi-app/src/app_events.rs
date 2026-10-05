@@ -1470,6 +1470,8 @@ impl ApplicationHandler for App {
                 self.editor_reload_frame(dt);
                 // the bus company in multiplayer: the host's announcements, a friend's run
                 self.company_sync(dt);
+                // the dispatcher: the host tells the others who drives which duty
+                self.dispatch_tick(dt);
                 self.company_hud = self.company_line();
                 // the host sends every edit of the map again now and then (players join)
                 if self.lan.as_ref().map(|l| l.role == omsi_net::Role::Host).unwrap_or(false) {

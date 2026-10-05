@@ -438,9 +438,13 @@ pub(crate) fn items(app: &App, kind: &ListKind) -> Vec<(String, String)> {
             }
         }
         ListKind::Tablet => {
+            // (the ask of the control room first: its buttons lie over the others)
+            let (first, rest) = crate::dispatch::tablet_items(app);
+            out.extend(first);
             for (label, action) in tablet_rows(app) {
                 out.push((label, action));
             }
+            out.extend(rest);
         }
     }
     out.push((tr("Back"), "back".into()));
@@ -774,6 +778,7 @@ pub(crate) fn run_move(app: &mut App, kind: &ListKind, action: &str, mv: Move) -
             }
             None
         }
+        ListKind::Tablet if crate::dispatch::tablet_action(app, verb, arg) => Some(ListKind::Tablet),
         ListKind::Tablet if verb == "clock" => {
             if app.shift_on {
                 // the settlement first; confirming it is what pays
@@ -2626,7 +2631,7 @@ pub(crate) fn start_duty_at(app: &mut App, line: &str, tour: &str, trip: usize, 
     app.service_msg = Some((format!("Line {line}, tour {}", tour.trim()), 4.0));
 }
 
-fn start_duty(app: &mut App, line: &str, tour: &str) {
+pub(crate) fn start_duty(app: &mut App, line: &str, tour: &str) {
     let (Some(w), Some(sch)) = (app.world.clone(), app.schedule.as_mut()) else { return };
     let now = app.clock.time;
     match sch.player_duty(&w, line, tour, now, None, false) {
