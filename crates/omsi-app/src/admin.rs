@@ -460,6 +460,21 @@ pub(crate) fn command(app: &mut App, from: u32, text: &str) {
         "admin-no" if from == 1 => app.service_msg = Some(("Wrong admin password".into(), 4.0)),
         // (a game hosting by code sent a notice: the player's game showed it)
         "notify-seen" => log::info!("LAN: player {from} saw notice {}", arg.trim()),
+        // (host → us) the host's bus company we drive for: its balance and short name
+        "company" if from == 1 => {
+            let (bal, short) = arg.split_once(' ').unwrap_or((arg, ""));
+            if let (Ok(b), false) = (bal.trim().parse::<f64>(), short.trim().is_empty()) {
+                if b.is_finite() {
+                    let first = app.remote_company.is_none();
+                    app.remote_company = Some((short.trim().chars().take(40).collect(), b));
+                    if first {
+                        app.service_msg = Some((format!("{} {}", omsi_ui::tr("You drive for the host's company:"), short.trim()), 6.0));
+                    }
+                }
+            }
+        }
+        // (a friend → the host) the state of their run for the host's company
+        "comprun" if from != 1 => app.friend_run(from, arg),
         // (host by code: only the host administers its own game)
         _ => log::info!("LAN: command '{text}' from player {from} not taken"),
     }

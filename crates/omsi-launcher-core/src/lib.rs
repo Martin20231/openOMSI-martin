@@ -1449,6 +1449,9 @@ pub struct Session {
     pub driving: f64,
     pub comfort: f64,
     pub ticketing: f64,
+    /// A friend's run for the host's company in multiplayer (their name; see `company`).
+    #[serde(default)]
+    pub friend: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -1495,7 +1498,7 @@ pub fn company_values_path() -> PathBuf {
 pub fn company_runs() -> Vec<company::Run> {
     let mut v: Vec<company::Run> = sessions()
         .into_iter()
-        .map(|s| company::Run { time: s.time, map: s.map, bus: s.bus, line: s.line, seconds: s.seconds, metres: s.metres, stops: s.stops, early: s.early, late: s.late, cash: s.cash, crashes: s.crashes, hurt: s.hurt })
+        .map(|s| company::Run { time: s.time, map: s.map, bus: s.bus, line: s.line, seconds: s.seconds, metres: s.metres, stops: s.stops, early: s.early, late: s.late, cash: s.cash, crashes: s.crashes, hurt: s.hurt, driver: s.friend })
         .collect();
     v.reverse();
     v

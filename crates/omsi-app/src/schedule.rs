@@ -457,6 +457,9 @@ pub struct Schedule {
     /// hashing each tour to a number put the same fleet number on two buses at once.
     tour_vehicle: HashMap<u64, (usize, usize)>,
     used_numbers: HashSet<(String, String)>,
+    /// The player's bus company: per line (lower case) its buses with a hired driver, in
+    /// order - the line's first tours run with them (see [`Schedule::set_company_fleet`]).
+    company: HashMap<String, Vec<(Arc<VehicleType>, omsi_map::DepotEntry)>>,
 }
 
 /// A tour's bus waits at the end of a trip for the next one of its tour when that leaves
@@ -745,6 +748,7 @@ impl Schedule {
             car_use,
             tour_vehicle: HashMap::new(),
             used_numbers: HashSet::new(),
+            company: HashMap::new(),
         };
         s.assign_car_use();
         s
@@ -1284,20 +1288,62 @@ impl Schedule {
         tour_key_of(&d.ai_group.to_ascii_lowercase(), &d.line, &d.tour)
     }
 
+    /// The player's bus company drives these: `fleet` is (line, `.bus` file, fleet number)
+    /// of each company bus that has a hired driver on its line. The line's tours, in the
+    /// timetable's order, take them one each; the tours after them keep the depot's buses.
+    pub fn set_company_fleet(&mut self, root: &Path, fleet: &[(String, String, u32)]) {
+        self.company.clear();
+        let mut loaded: HashMap<String, Option<Arc<VehicleType>>> = HashMap::new();
+        for (line, file, nr) in fleet {
+            let ty = loaded
+                .entry(file.to_ascii_lowercase())
+                .or_insert_with(|| {
+                    let path = omsi_cfg::resolve_path(root, file);
+                    VehicleType::load_ai(root, &path).map(Arc::new).map_err(|e| log::warn!("company bus {file}: {e}")).ok()
+                })
+                .clone();
+            let Some(ty) = ty else { continue };
+            let entry = omsi_map::DepotEntry { number: nr.to_string(), registration: String::new(), paint: String::new(), from: None, to: None };
+            self.company.entry(line.trim().to_ascii_lowercase()).or_default().push((ty, entry));
+        }
+        let n: usize = self.company.values().map(|v| v.len()).sum();
+        if n > 0 {
+            log::info!("timetable: {n} buses of the player's company on {} line(s)", self.company.len());
+        }
+    }
+
+    /// The company's bus departure `i` runs with: the line's k-th tour takes its k-th bus.
+    fn company_vehicle(&self, i: usize) -> Option<(Arc<VehicleType>, omsi_map::DepotEntry)> {
+        if self.company.is_empty() {
+            return None;
+        }
+        let d = &self.departures[i];
+        let buses = self.company.get(&d.line.trim().to_ascii_lowercase())?;
+        let line = self.data.lines.iter().find(|l| l.name.trim().eq_ignore_ascii_case(d.line.trim()))?;
+        let k = line.tours.iter().position(|t| t.number.trim().eq_ignore_ascii_case(d.tour.trim()))?;
+        buses.get(k).cloned()
+    }
+
     /// The vehicle departure `i` is driven with (see [`Choice`]).
     fn choose(&mut self, i: usize, world: &World) -> Option<Choice> {
         let group = self.departures[i].ai_group.to_ascii_lowercase();
         let h = self.tour_key(i);
         // trains: the group lists .zug files instead of depot vehicles
-        let train = self
-            .trains
-            .get(&group)
-            .and_then(|t| t.get((h % t.len().max(1) as u64) as usize).cloned());
+        let own = self.company_vehicle(i);
+        let train = if own.is_some() {
+            None
+        } else {
+            self.trains.get(&group).and_then(|t| t.get((h % t.len().max(1) as u64) as usize).cloned())
+        };
         let (ty, numbers, hof): (
             Arc<VehicleType>,
             Vec<omsi_map::DepotEntry>,
             Option<Arc<omsi_vehicle::Hof>>,
-        ) = match (&train, self.depots.get(&group).filter(|v| !v.is_empty())) {
+        ) = if let Some((t, e)) = own {
+            // the company's bus: its own fleet number, the depot file of the tour's group
+            let hof = self.depots.get(&group).and_then(|v| v.iter().find_map(|x| x.2.clone()));
+            (t, vec![e], hof)
+        } else { match (&train, self.depots.get(&group).filter(|v| !v.is_empty())) {
             (Some(cars), _) => (cars[0].0.clone(), Vec::new(), None),
             (None, Some(vehicles)) => {
                 // The depot's types come out in proportion to their fleets: a typgroup
@@ -1347,7 +1393,7 @@ impl Schedule {
                     None,
                 )
             }
-        };
+        } };
         // A depot bus as Omsi.exe makes it (0x70a174): the fleet number of its ailists line;
         // the plate of that line, else - unless the bus's plates are free - the plate the bus
         // gives the number ([registration_list] / [registration_automatic]); and the repaint

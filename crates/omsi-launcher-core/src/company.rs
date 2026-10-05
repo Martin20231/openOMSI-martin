@@ -401,6 +401,10 @@ pub struct Run {
     pub cash: f64,
     pub crashes: i32,
     pub hurt: i32,
+    /// A friend drove it for the company in a multiplayer session (their name): no rent
+    /// for their bus, and the company's own time does not move on with it (the host's
+    /// run, at the same time, moves it).
+    pub driver: Option<String>,
 }
 
 /// What booking a run did.
@@ -410,6 +414,36 @@ pub struct Booked {
     pub costs: f64,
     /// The company's bus that was driven (fleet number), if it was one of them.
     pub bus: Option<u32>,
+}
+
+/// What a run brings and costs (see [`Company::price`]).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RunPrice {
+    pub km: f64,
+    pub hours: f64,
+    pub punctual: i32,
+    pub tickets: f64,
+    pub bonus: f64,
+    pub diesel: f64,
+    /// For a bus the company does not own.
+    pub rental: f64,
+    pub fines: f64,
+    /// The company's bus driven (index in `buses`).
+    pub own_bus: Option<usize>,
+}
+
+impl RunPrice {
+    pub fn income(&self) -> f64 {
+        self.tickets + self.bonus
+    }
+
+    pub fn costs(&self) -> f64 {
+        self.diesel + self.rental + self.fines
+    }
+
+    pub fn result(&self) -> f64 {
+        self.income() - self.costs()
+    }
 }
 
 /// A trip the player drove for the company (the last ones are kept for the overview).
@@ -532,64 +566,67 @@ impl Company {
     }
 
     /// Book a run of the player: its takings and costs, then the company time it took.
+    /// What a run brings and costs, by its parts (nothing is booked): what [`Company::book`]
+    /// books, and what the game shows while the run is still going.
+    pub fn price(&self, run: &Run) -> RunPrice {
+        let r = self.rules();
+        let tune = tuning();
+        let km = (run.metres / 1000.0).max(0.0);
+        let hours = (run.seconds / 3600.0).max(0.0);
+        let punctual = (run.stops - run.early - run.late).max(0);
+        let own_bus = self.buses.iter().position(|b| same_file(&b.file, &run.bus));
+        RunPrice {
+            km,
+            hours,
+            punctual,
+            tickets: run.cash.max(0.0),
+            bonus: punctual as f64 * r.stop_bonus,
+            diesel: km * tune.litres_per_km * r.diesel,
+            rental: if own_bus.is_none() && run.driver.is_none() { hours * r.rental_per_hour } else { 0.0 },
+            fines: run.crashes.max(0) as f64 * r.crash_fine + run.hurt.max(0) as f64 * r.hurt_fine,
+            own_bus,
+        }
+    }
+
+    /// Book a run of the player: its takings and costs, then the company time it took.
     pub fn book(&mut self, run: &Run) -> Option<Booked> {
         if !self.takes(run) {
             return None;
         }
         self.seen.push(run.time);
+        let p = self.price(run);
         let r = self.rules();
-        let km = (run.metres / 1000.0).max(0.0);
-        let hours = (run.seconds / 3600.0).max(0.0);
+        let tune = tuning();
         let line = run.line.clone().unwrap_or_default();
         let what = if line.is_empty() { "Free drive".to_string() } else { format!("Line {line}") };
         let mut out = Booked::default();
         let before = self.balance;
-        let mut income = 0.0;
-        let mut costs = 0.0;
-        // takings and the punctual stops
-        if run.cash > 0.0 {
-            self.book_entry(Kind::Tickets, run.cash, &what);
-            income += run.cash;
-        }
-        let punctual = (run.stops - run.early - run.late).max(0);
+        self.book_entry(Kind::Tickets, p.tickets, &what);
         self.stops += run.stops.max(0) as i64;
-        self.on_time += punctual as i64;
-        let bonus = punctual as f64 * r.stop_bonus;
-        if bonus > 0.0 {
-            self.book_entry(Kind::Bonus, bonus, &format!("{what} · {punctual}/{}", run.stops));
-            income += bonus;
+        self.on_time += p.punctual as i64;
+        self.book_entry(Kind::Bonus, p.bonus, &format!("{what} · {}/{}", p.punctual, run.stops));
+        self.book_entry(Kind::Diesel, -p.diesel, &format!("{what} · {:.1} km", p.km));
+        self.book_entry(Kind::Rental, -p.rental, &what);
+        self.book_entry(Kind::Fines, -p.fines, &format!("{what} · {}", run.crashes + run.hurt));
+        if let Some(i) = p.own_bus {
+            let b = &mut self.buses[i];
+            b.km += p.km;
+            b.condition = (b.condition - p.km / 1000.0 * r.wear_per_1000km - run.crashes.max(0) as f64 * tune.crash_wear).clamp(0.0, 100.0);
+            out.bus = Some(b.nr);
         }
-        // diesel, and the bus: the company's own (it wears) or a hired one (rent)
-        let tune = tuning();
-        let diesel = km * tune.litres_per_km * r.diesel;
-        self.book_entry(Kind::Diesel, -diesel, &format!("{what} · {km:.1} km"));
-        costs += diesel;
-        match self.buses.iter().position(|b| same_file(&b.file, &run.bus)) {
-            Some(i) => {
-                let b = &mut self.buses[i];
-                b.km += km;
-                b.condition = (b.condition - km / 1000.0 * r.wear_per_1000km - run.crashes.max(0) as f64 * tune.crash_wear).clamp(0.0, 100.0);
-                out.bus = Some(b.nr);
-            }
-            None if hours > 0.0 => {
-                let rent = hours * r.rental_per_hour;
-                self.book_entry(Kind::Rental, -rent, &what);
-                costs += rent;
-            }
-            None => {}
+        let mut bus_name = run.bus.rsplit(['/', '\\']).next().unwrap_or(&run.bus).trim_end_matches(".bus").to_string();
+        if let Some(d) = &run.driver {
+            bus_name = format!("{bus_name} · {d}");
         }
-        let fines = run.crashes.max(0) as f64 * r.crash_fine + run.hurt.max(0) as f64 * r.hurt_fine;
-        if fines > 0.0 {
-            self.book_entry(Kind::Fines, -fines, &format!("{what} · {}", run.crashes + run.hurt));
-            costs += fines;
-        }
-        let bus_name = run.bus.rsplit(['/', '\\']).next().unwrap_or(&run.bus).trim_end_matches(".bus").to_string();
-        self.trips.insert(0, Trip { time: run.time, line, bus: bus_name, km, result: self.balance - before, punctual: if run.stops > 0 { punctual as f64 / run.stops as f64 } else { 1.0 } });
+        self.trips.insert(0, Trip { time: run.time, line, bus: bus_name, km: p.km, result: self.balance - before, punctual: if run.stops > 0 { p.punctual as f64 / run.stops as f64 } else { 1.0 } });
         self.trips.truncate(KEEP_TRIPS);
-        out.income = income;
-        out.costs = costs;
-        // the time it took: the rest of the company works meanwhile
-        self.run(hours);
+        out.income = p.income();
+        out.costs = p.costs();
+        // the time it took: the rest of the company works meanwhile (a friend's run went at
+        // the same time as the host's)
+        if run.driver.is_none() {
+            self.run(p.hours);
+        }
         Some(out)
     }
 
@@ -1009,7 +1046,7 @@ mod tests {
     }
 
     fn run(time: u64, bus: &str) -> Run {
-        Run { time, map: MAP.into(), bus: bus.into(), line: Some("136".into()), seconds: 3600.0, metres: 24_000.0, stops: 40, early: 2, late: 3, cash: 310.0, crashes: 0, hurt: 0 }
+        Run { time, map: MAP.into(), bus: bus.into(), line: Some("136".into()), seconds: 3600.0, metres: 24_000.0, stops: 40, early: 2, late: 3, cash: 310.0, crashes: 0, hurt: 0, driver: None }
     }
 
     #[test]
@@ -1065,6 +1102,37 @@ mod tests {
         other.map = "maps/Grundorf/global.cfg".into();
         assert!(c.book(&other).is_none(), "another map");
         assert!((c.punctuality() - 35.0 / 40.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_price_of_a_run_is_what_booking_it_does() {
+        let mut c = company();
+        let nr = c.buy("Vehicles/MAN_NL202/MAN_NL202.bus", "MAN NL202").unwrap();
+        let r = run(2000, "Vehicles/MAN_NL202/MAN_NL202.bus");
+        let p = c.price(&r);
+        assert_eq!(p.own_bus, Some(0));
+        assert_eq!(p.rental, 0.0);
+        let before = c.balance;
+        let b = c.book(&r).unwrap();
+        assert_eq!(b.bus, Some(nr));
+        assert!((b.income - p.income()).abs() < 1e-9 && (b.costs - p.costs()).abs() < 1e-9);
+        assert!((c.trips[0].result - p.result()).abs() < 0.01, "{} vs {}", c.trips[0].result, p.result());
+        assert!(c.balance < before + p.result() + 1e-9, "the hour's rent comes on top");
+        // a bus of nobody: rent
+        assert!(c.price(&run(3000, "other.bus")).rental > 0.0);
+    }
+
+    #[test]
+    fn a_friends_run_pays_no_rent_and_moves_no_time() {
+        let mut c = company();
+        let mut r = run(2000, "Vehicles/Their/own.bus");
+        r.driver = Some("Tobi_96".into());
+        let p = c.price(&r);
+        assert_eq!(p.rental, 0.0);
+        c.book(&r).unwrap();
+        assert_eq!(c.hours, 0.0);
+        assert!(c.ledger.iter().all(|e| e.kind != Kind::Rent && e.kind != Kind::Rental));
+        assert!(c.trips[0].bus.ends_with("· Tobi_96"));
     }
 
     #[test]

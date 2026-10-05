@@ -311,6 +311,17 @@ pub(crate) struct App {
     pub(crate) log_state: crate::applog::LogState,
     /// The driver's personnel file and this session's statistics.
     pub(crate) career: career::Career,
+    /// The player's bus company, when this session is on its home map (the launcher's
+    /// Company page; its balance and what this run earns are shown top left).
+    pub(crate) company: Option<omsi_launcher_lib::company::Company>,
+    /// In a friend's multiplayer game: the host's company this player drives for (its short
+    /// name and balance, as the host last said; see `company_lan`).
+    pub(crate) remote_company: Option<(String, f64)>,
+    /// The host's game: friends' runs not yet written (see `company_lan`).
+    pub(crate) friend_runs: crate::company_lan::FriendRuns,
+    /// Seconds to the next company announcement or run update, and this game's run id.
+    pub(crate) company_sync_t: f32,
+    pub(crate) company_run_id: u64,
     /// The duty's stops with their times as driven, kept in a file (`journey`).
     pub(crate) journey: Option<crate::journey::Journey>,
     /// How wet the roads are (0..1), built up by rain and dried by the sun.
@@ -359,6 +370,44 @@ pub(crate) struct App {
 }
 
 impl App {
+    /// The company's line top left while the player drives on its home map: its short
+    /// name, the balance with this run counted in, and what this run has brought so far
+    /// (tickets and punctual stops less diesel, rent and fines, as the launcher will book it).
+    pub(crate) fn company_line(&self) -> Option<String> {
+        use omsi_launcher_lib::company::{money, Run};
+        // a friend's game: whose company it is and what it holds
+        if self.company.is_none() {
+            let (short, balance) = self.remote_company.as_ref()?;
+            return Some(format!("{short} · {} {} · {}", omsi_ui::tr("Balance"), money(*balance), omsi_ui::tr("you drive for this company")));
+        }
+        let c = self.company.as_ref()?;
+        let k = &self.career;
+        let run = Run {
+            time: 0,
+            map: self.args.map.clone(),
+            bus: self.args.bus.clone().unwrap_or_default(),
+            line: self.args.line.clone(),
+            seconds: k.seconds,
+            metres: k.metres,
+            stops: k.stops[0],
+            early: k.stops[1],
+            late: k.stops[2],
+            cash: k.tickets.1,
+            crashes: k.crashes[0],
+            hurt: k.crashes[1],
+        };
+        let r = c.price(&run).result();
+        let name = if c.short.trim().is_empty() { c.name.clone() } else { c.short.clone() };
+        Some(format!(
+            "{name} · {} {} · {} {}{}",
+            omsi_ui::tr("Balance"),
+            money(c.balance + r),
+            omsi_ui::tr("this trip"),
+            if r > 0.0 { "+" } else { "" },
+            money(r)
+        ))
+    }
+
     #[cfg(windows)]
     pub(crate) fn vr_active(&self) -> bool { self.vr.is_some() }
 
@@ -717,6 +766,18 @@ impl App {
                 if let Some(d) = self.args.driver.as_deref() {
                     self.career = career::Career::load(&self.args.root, d);
                 }
+                // the bus company of this map, if the player has one (see `company_line`)
+                {
+                    use omsi_launcher_lib::company;
+                    if let Err(e) = company::load_tuning(&omsi_launcher_lib::company_values_path()) {
+                        log::warn!("company values: {e}");
+                    }
+                    self.company = company::Company::load(&omsi_launcher_lib::company_path()).filter(|c| company::same_file(&c.map, &self.args.map));
+                    self.company_run_id = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(1);
+                    if let Some(c) = &self.company {
+                        log::info!("company {}: balance {:.0}, {} buses", c.name, c.balance, c.buses.len());
+                    }
+                }
                 // (and a player who joins another's game sees the host's people)
                 if self.args.passengers || self.args.lan_join.is_some() {
                     let mut h = humans::Humans::new(&self.args.root);
@@ -767,6 +828,15 @@ impl App {
                     if self.args.schedule {
                         let mut sch =
                             schedule::Schedule::new(&self.args.root, &w, &start_clock(&self.args));
+                        // the company's buses on its lines: one per hired driver of the line
+                        if let Some(c) = &self.company {
+                            let mut fleet: Vec<(String, String, u32)> = Vec::new();
+                            for line in &c.lines {
+                                let drivers = c.drivers.iter().filter(|d| &d.line == line).count();
+                                fleet.extend(c.buses.iter().filter(|b| &b.line == line && b.condition > 0.0).take(drivers).map(|b| (line.clone(), b.file.clone(), b.nr)));
+                            }
+                            sch.set_company_fleet(&self.args.root, &fleet);
+                        }
                         sch.precache(
                             &w,
                             &renderer,

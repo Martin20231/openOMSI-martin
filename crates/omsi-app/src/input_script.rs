@@ -32,6 +32,10 @@ impl App {
         if let Some(mut p) = self.plugins.take() {
             p.finalize();
         }
+        // the bus company in multiplayer: the friends' runs the host still holds, and a
+        // friend's last state of their run to the host
+        self.write_friend_runs(None);
+        self.send_company_run(true);
         if self.player.is_none() || self.career.seconds <= 0.0 {
             return;
         }

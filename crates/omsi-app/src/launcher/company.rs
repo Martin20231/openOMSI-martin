@@ -262,7 +262,7 @@ fn found(l: &mut Launcher, area: Rect) {
     l.ui.heading(Rect::new(inner.x, y, inner.w, 26.0), "3 · Multiplayer", None);
     y += 30.0;
     let mut share = l.company.share;
-    l.ui.toggle("co-share", Rect::new(inner.x, y, inner.w, 28.0), &mut share, "Share the company with friends (comes with the next update)");
+    l.ui.toggle("co-share", Rect::new(inner.x, y, inner.w, 28.0), &mut share, "Share the company with friends in multiplayer");
     l.company.share = share;
 
     // preview and the button
@@ -621,7 +621,14 @@ fn staff(l: &mut Launcher, body: Rect) {
     }
     y += ROW + 24.0;
     l.ui.heading(Rect::new(inner.x, y, inner.w, 26.0), "Friends", None);
-    l.ui.paragraph("Soon friends will drive for your company in multiplayer and share its account. This comes with the next update.", Vec2::new(inner.x, y + 34.0), inner.w, 12.5, Weight::Regular, TEXT_DIM);
+    let mut share = c.shared;
+    if l.ui.toggle("co-share-staff", Rect::new(inner.x, y + 30.0, inner.w, 28.0), &mut share, "Friends drive for the company") {
+        if let Some(co) = l.company.company.as_mut() {
+            co.shared = share;
+        }
+        l.company.save(&mut l.state);
+    }
+    l.ui.paragraph("Host a multiplayer session on the company's map: the friends who join see its account, and what they earn is booked here after the session.", Vec2::new(inner.x, y + 66.0), inner.w, 12.5, Weight::Regular, TEXT_DIM);
     apply(l, acts);
 }
 

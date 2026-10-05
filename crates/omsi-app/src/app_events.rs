@@ -1449,6 +1449,8 @@ impl ApplicationHandler for App {
                 self.placing_frame();
                 // the tiles the spline editor changed, read again once the keys rest
                 self.editor_reload_frame(dt);
+                // the bus company in multiplayer: the host's announcements, a friend's run
+                self.company_sync(dt);
                 // the host sends every edit of the map again now and then (players join)
                 if self.lan.as_ref().map(|l| l.role == omsi_net::Role::Host).unwrap_or(false) {
                     self.editor_sync_t -= dt;
@@ -2154,6 +2156,9 @@ impl ApplicationHandler for App {
                         if let Some(owed) = h.change_due {
                             lines.push(format!("Change due: {owed:.2}"));
                         }
+                    }
+                    if let Some(l) = self.company_line() {
+                        lines.push(l);
                     }
                     let __t = Instant::now();
                     // (the frame's overlays start empty; the notes are the interface's, in

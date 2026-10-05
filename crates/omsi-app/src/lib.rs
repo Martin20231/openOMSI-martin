@@ -33,6 +33,7 @@ mod ambience;
 mod camera_arm;
 mod career;
 mod describe;
+mod company_lan;
 mod editor;
 mod spline_editor;
 mod game_lists;
@@ -582,6 +583,11 @@ pub(crate) fn make_app(mut args: Args, server_cfg: Option<server::ServerCfg>) ->
         log_state: Default::default(),
         plugins: None,
         career: Default::default(),
+        company: None,
+        remote_company: None,
+        friend_runs: Default::default(),
+        company_sync_t: 0.0,
+        company_run_id: 0,
         journey: None,
         wetness: 0.0,
         cloud_drift: [0.0; 2],
