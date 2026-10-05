@@ -399,7 +399,7 @@ impl App {
             hurt: k.crashes[1],
             driver: None,
         };
-        let r = c.price(&run).result();
+        let r = c.price(&run).result().round();
         let name = if c.short.trim().is_empty() { c.name.clone() } else { c.short.clone() };
         Some(format!(
             "{name} · {} {} · {} {}{}",

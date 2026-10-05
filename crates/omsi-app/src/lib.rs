@@ -118,6 +118,11 @@ pub(crate) fn ui_language(code: &str) {
     omsi_ui::i18n::set_lookup(|lang, text| _rust_i18n_try_translate(lang, text).map(|t| t.into_owned()));
     let iso = omsi_launcher_lib::language_iso(code);
     omsi_ui::i18n::set_language(iso);
+    // (the games the launcher starts speak the launcher's language: see `Settings::load`)
+    let lang = omsi_launcher_lib::language_code(code);
+    if std::env::var("OMSI_LANGUAGE").ok().as_deref() != Some(lang) {
+        std::env::set_var("OMSI_LANGUAGE", lang);
+    }
     omsi_sim::vehicle_api::set_locale(iso);
 }
 

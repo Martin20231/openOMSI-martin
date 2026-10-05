@@ -1022,8 +1022,9 @@ pub fn same_file(a: &str, b: &str) -> bool {
 
 /// An amount as the launcher shows it: "248.350 €" (German grouping; whole euros).
 pub fn money(v: f64) -> String {
-    let neg = v < 0.0;
     let n = v.abs().round() as u64;
+    // (less than half a euro is 0 €, without a sign)
+    let neg = v < 0.0 && n > 0;
     let s = n.to_string();
     let mut out = String::new();
     for (i, ch) in s.chars().enumerate() {

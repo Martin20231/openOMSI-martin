@@ -388,6 +388,10 @@ impl Settings {
             text.push_str(&format!("\ngraphics={g}\n"));
         }
         let mut s = Self::from_text(&text);
+        // OMSI_LANGUAGE: the language the launcher that started this game shows
+        if let Some(l) = std::env::var("OMSI_LANGUAGE").ok().filter(|l| !l.trim().is_empty()) {
+            s.language = crate::describe::language_code(&l);
+        }
         // OMSI_SAFE_GPU=<n>: the game was started again after its graphics device was lost
         // (see `App::restart_after_device_loss`): lighter on the card each time
         if let Some(n) = omsi_cfg::env::var("OMSI_SAFE_GPU").ok().and_then(|v| v.parse::<u32>().ok()).filter(|n| *n > 0) {
