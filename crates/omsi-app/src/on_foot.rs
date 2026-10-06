@@ -676,6 +676,13 @@ impl App {
         // inside a bus: the wheel of the own bus by the driver's place, else the free seat
         // nearest by
         if let Some((bus, _)) = f.inside {
+            if let BusId::Ai(id) = bus {
+                let at = f.pos;
+                if self.near_ai_wheel(id, at) {
+                    self.take_ai_bus(id);
+                    return;
+                }
+            }
             if bus == BusId::Player {
                 let stand = self.player.as_ref().and_then(|p| self.humans.as_mut().and_then(|h| h.driver_stand(&p.vehicle).and_then(|l| h.vehicle_cabin_world(&p.vehicle, l))));
                 if stand.map(|s| (s - pos).truncate().length() < 2.5).unwrap_or(true) {
@@ -713,6 +720,11 @@ impl App {
                 }
                 return;
             }
+        }
+        // a timetable bus another driver is on: G at its driver's door takes the wheel at once
+        if let Some(id) = self.ai_bus_at_door(pos) {
+            self.take_ai_bus(id);
+            return;
         }
         // (the door by the driver's seat, not the first door of the list: next to it the
         // walker was put in the seat behind the driver)
@@ -1250,6 +1262,113 @@ impl App {
         }
         self.remote_walkers = now;
     }
+
+    /// The timetable bus whose driver's door is in reach, nearer than the own door.
+    fn ai_bus_at_door(&mut self, pos: DVec3) -> Option<u64> {
+        if self.traffic.as_ref().is_some_and(|t| t.is_mirror()) {
+            return None;
+        }
+        let own = match (self.player.as_ref(), self.humans.as_mut()) {
+            (Some(p), Some(h)) => h.vehicle_driver_door(&p.vehicle).map(|d| (d - pos).truncate().length()),
+            _ => None,
+        };
+        let ids: Vec<u64> = self.traffic.as_ref()?.cars.iter().filter(|c| c.is_bus() && !c.gone && (c.vehicle.position - pos).truncate().length() < 30.0).map(|c| c.id).collect();
+        let mut best: Option<(u64, f64)> = None;
+        for id in ids {
+            let door = {
+                let v = &self.traffic.as_ref()?.cars.iter().find(|c| c.id == id)?.vehicle;
+                self.humans.as_mut()?.vehicle_driver_door(v)
+            };
+            let Some(door) = door else { continue };
+            let d = (door - pos).truncate().length();
+            if take_other_bus(own, d) && best.map(|b| d < b.1).unwrap_or(true) {
+                best = Some((id, d));
+            }
+        }
+        best.map(|b| b.0)
+    }
+
+    /// Standing at the wheel of timetable bus `id`.
+    fn near_ai_wheel(&mut self, id: u64, pos: DVec3) -> bool {
+        let Some(traffic) = self.traffic.as_ref() else { return false };
+        let Some(car) = traffic.cars.iter().find(|c| c.id == id && c.is_bus()) else { return false };
+        let Some(h) = self.humans.as_mut() else { return false };
+        let Some(stand) = h.driver_stand(&car.vehicle).and_then(|l| h.vehicle_cabin_world(&car.vehicle, l)) else { return false };
+        (stand - pos).truncate().length() < 2.5
+    }
+
+    /// Sit down in timetable bus `id` at once. The bus driven until now stays where it is.
+    fn take_ai_bus(&mut self, id: u64) {
+        let tour = self.schedule.as_ref().and_then(|s| s.line_tour_of(id));
+        let Some(mut car) = self.traffic.as_mut().and_then(|t| t.extract_bus(id)) else { return };
+        let ai_id = car.id;
+        if let (Some(a), Some(mut ss)) = (self.audio.as_ref(), car.sounds.take()) {
+            ss.stop_all(a);
+        }
+        let mut next = crate::spawn::player_from_bus(&self.args.root, car.vehicle, car.render, std::mem::take(&mut car.trailer_renders));
+        next.vehicle.host.auto_clutch = if self.settings.auto_clutch { 1.0 } else { 0.0 };
+        if let Some(a) = self.audio.as_ref() {
+            next.load_sounds(a);
+        }
+        if let Some(mut now) = self.player.take() {
+            if let (Some(a), Some(mut ss)) = (self.audio.as_ref(), now.sounds.take()) {
+                ss.stop_all(a);
+            }
+            if let Some(mut d) = now.driver.take() {
+                if let (Some(r), Some(scene)) = (self.renderer.as_ref(), self.scene.as_mut()) {
+                    d.hide(r, scene);
+                }
+            }
+            if let Some(h) = self.humans.as_mut() {
+                h.player_bus_swapped(now.uid, next.uid, &mut next.vehicle);
+            }
+            self.placed.push(now);
+        } else if let Some(h) = self.humans.as_mut() {
+            h.player_bus_swapped(0, next.uid, &mut next.vehicle);
+        }
+        if let Some(h) = self.humans.as_mut() {
+            h.took_ai_bus(ai_id);
+        }
+        if let (Some(w), Some(r), Some(scene)) = (self.world.as_ref(), self.renderer.as_ref(), self.scene.as_mut()) {
+            next.driver = crate::driver::DriverFigure::new(w, r, scene, &next.vehicle, 0);
+        }
+        let name = format!("{} {}", next.vehicle.ty.def.manufacturer, next.vehicle.ty.def.type_name);
+        self.player = Some(next);
+        if let Some(f) = self.on_foot.take() {
+            if let Some(h) = self.humans.as_mut() {
+                h.avatar_remove(AVATAR_KEY);
+            }
+            let _ = f;
+        }
+        self.view = "driver".into();
+        self.sync_view_look();
+        self.look = (0.0, 0.0);
+        if let (Some(cam), Some(p)) = (self.camera.as_ref(), self.player.as_ref()) {
+            self.camera = Some(p.camera("driver", cam));
+        }
+        if let Some((line, tour_name)) = tour.clone() {
+            if let (Some(sch), Some(w)) = (self.schedule.as_mut(), self.world.as_ref()) {
+                let now = self.clock.time as f64;
+                if let Ok(d) = sch.player_duty(w, &line, &tour_name, now, None, true) {
+                    self.duty = Some(d);
+                }
+            }
+        }
+        if let Some(uid) = self.player.as_ref().map(|p| p.uid) {
+            let file = self.driven_bus_file();
+            self.remember_company_bus(uid, &file);
+        }
+        let text = match tour {
+            Some((line, _)) if !line.trim().is_empty() => omsi_ui::tr("Taken over: {name}, line {line}").replace("{name}", name.trim()).replace("{line}", line.trim()),
+            _ => omsi_ui::tr("Taken over: {name}").replace("{name}", name.trim()),
+        };
+        self.service_msg = Some((text, 5.0));
+    }
+}
+
+/// G takes the other driver's bus when its door is in reach and not farther away than the own door.
+fn take_other_bus(own_door_m: Option<f64>, other_door_m: f64) -> bool {
+    other_door_m < DOOR_REACH && own_door_m.map(|d| other_door_m <= d).unwrap_or(true)
 }
 
 #[cfg(test)]
@@ -1307,5 +1426,13 @@ mod tests {
         // (seated: nothing to kneel on)
         f.seat = Some((BusId::Player, 3));
         assert!(!f.toggle_kneel() && !f.kneel);
+    }
+
+    #[test]
+    fn the_other_bus_is_taken_when_its_door_is_the_nearer_one() {
+        assert!(take_other_bus(None, 2.0));
+        assert!(!take_other_bus(None, 5.0));
+        assert!(!take_other_bus(Some(1.0), 2.0));
+        assert!(take_other_bus(Some(4.0), 2.0));
     }
 }

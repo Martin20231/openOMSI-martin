@@ -6768,6 +6768,13 @@ impl Traffic {
         (self.cars.len() - buses, buses, self.dormant.len(), self.parked.values().map(Vec::len).sum())
     }
 
+    /// Take a timetable bus off the road and keep its vehicle, so the player can drive it.
+    /// Random cars stay. The render is not released: the caller keeps it.
+    pub fn extract_bus(&mut self, id: u64) -> Option<AiCar> {
+        let i = self.cars.iter().position(|c| c.id == id && c.is_bus() && !c.gone)?;
+        Some(self.cars.swap_remove(i))
+    }
+
     /// Take a car off the road now (the player took over its tour).
     pub fn remove_car(
         &mut self,

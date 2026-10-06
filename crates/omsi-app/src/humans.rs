@@ -3280,6 +3280,11 @@ impl Humans {
         }
     }
 
+    /// The player sat down in timetable bus `ai_id`: its passengers are the player's now.
+    pub fn took_ai_bus(&mut self, ai_id: u64) {
+        self.remap_bus(BusId::Ai(ai_id), BusId::Player);
+    }
+
     /// Bus `bus` is gone (the player removed it): whoever was in it stands where they were,
     /// on the ground, and walks off.
     pub fn evict(&mut self, bus: BusId, world: &World) {

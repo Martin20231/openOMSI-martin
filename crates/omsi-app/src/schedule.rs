@@ -3747,6 +3747,13 @@ impl Schedule {
         n
     }
 
+    /// The line and tour of the timetable bus `car`, when it is one of today's departures.
+    pub fn line_tour_of(&self, car: u64) -> Option<(String, String)> {
+        let k = *self.car_departure.get(&car)?;
+        let d = self.departures.get(k)?;
+        Some((d.line.clone(), d.tour.clone()))
+    }
+
     /// LAN play (host): the tours the other players drive now. A tour taken leaves the
     /// timetable like the player's own (its bus on the road goes); one given up (the player
     /// left, or took another duty) runs again from its next departure.

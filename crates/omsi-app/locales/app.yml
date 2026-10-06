@@ -24139,3 +24139,9 @@ _version: 2
 
 "Ends":
   de: "Ende"
+
+"Taken over: {name}":
+  de: "Übernommen: {name}"
+
+"Taken over: {name}, line {line}":
+  de: "Übernommen: {name}, Linie {line}"

@@ -156,6 +156,8 @@ fn player_identity(
     (number, ident)
 }
 
+static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 pub(crate) fn spawn_player(
     args: &Args,
     world: &World,
@@ -406,7 +408,6 @@ pub(crate) fn spawn_player(
     let bindings = omsi_content::KeyboardCfg::load(&crate::startup::keyboard_cfg(&args.root))
         .map(|k| k.with_game_defaults().vehicles)
         .unwrap_or_default();
-    static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let mut p = Player {
         uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         vehicle,
@@ -632,6 +633,66 @@ pub(crate) fn spawn_player(
         matches!(args.view.as_str(), "driver" | "pax"),
     );
     Ok(Some(p))
+}
+
+/// A player bus from one that was driving itself (a timetable bus just taken over).
+pub(crate) fn player_from_bus(root: &Path, vehicle: omsi_sim::VehicleInstance, render: scene::VehicleRender, trailer_renders: Vec<scene::VehicleRender>) -> Player {
+    let bindings = omsi_content::KeyboardCfg::load(&crate::startup::keyboard_cfg(root)).map(|k| k.with_game_defaults().vehicles).unwrap_or_default();
+    let vt_path = vehicle.ty.def.path.clone();
+    Player {
+        uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        vehicle,
+        render,
+        trailer_renders,
+        axes: Default::default(),
+        analog: Default::default(),
+        cam_choice: (0, 0),
+        bindings,
+        sounds: None,
+        pressed_mesh: None,
+        press_info: (true, 0.0),
+        auto_drag: None,
+        pressed_trailer_mesh: None,
+        occlude_controls: false,
+        startup: None,
+        startup_at: None,
+        give_ticket: false,
+        give_change: false,
+        door_buttons: hashbrown::HashMap::new(),
+        cam_before_special: None,
+        held_keys: Default::default(),
+        held_repeat: Default::default(),
+        hand_coupled: 0,
+        rail_bound: false,
+        rail: None,
+        head: Vec3::ZERO,
+        head_vel: Vec3::ZERO,
+        head_omega: Vec3::ZERO,
+        head_idle: Default::default(),
+        steer_look: 0.0,
+        seat: Vec3::ZERO,
+        mirror_offsets: crate::settings::mirror_offsets(&vt_path),
+        mirror_shifts: crate::settings::mirror_shifts(&vt_path),
+        mirror_fovs: crate::settings::mirror_fovs(&vt_path),
+        mirrors_dirty: false,
+        take_change: false,
+        toggled_up: Default::default(),
+        momentary_gears: crate::settings::Settings::load().momentary_gears,
+        auto_shift: crate::settings::Settings::load().auto_shift,
+        auto_shift_wait: 0.0,
+        auto_shift_idle: 0.0,
+        side_lights_by_l: false,
+        driver: None,
+        ibis_duty: None,
+        blind_pick: None,
+        ibis_typist: None,
+        duty_typed: false,
+        html_next_stop: None,
+        ibis_background: false,
+        arm: Default::default(),
+        blinker_key_state: 0,
+        blinker_cancel: crate::settings::Settings::load().blinker_cancel,
+    }
 }
 
 /// The paint scheme a vehicle wears: the one named (or numbered) by `--paint`; none named is
