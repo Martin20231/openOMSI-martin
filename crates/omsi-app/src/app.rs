@@ -326,6 +326,8 @@ pub(crate) struct App {
     pub(crate) company_hud: Option<String>,
     /// The dispatcher in multiplayer: roles, the duties handed out, an ask (see `dispatch`).
     pub(crate) dispo: crate::dispatch::Dispatch,
+    /// The change of driver in multiplayer (see `handover`).
+    pub(crate) handover: crate::handover::Handover,
     /// Clocked in for the company (F6): the shift runs, on foot and in the bus, until F6 again.
     pub(crate) shift_on: bool,
     /// The boss tries the driver view (F7): the account stays hidden. A friend in multiplayer

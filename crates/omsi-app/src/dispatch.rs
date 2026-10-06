@@ -614,11 +614,19 @@ pub(crate) fn request_view(app: &App) -> Option<RequestView> {
 pub(crate) fn tablet_items(app: &App) -> (Vec<(String, String)>, Vec<(String, String)>) {
     let tr = |t: &str| omsi_ui::tr(t).into_owned();
     let mut first = Vec::new();
-    if app.dispo.request.is_some() {
+    if app.handover.offer.is_some() {
+        first.push((tr("Take the wheel"), "haccept".to_string()));
+        first.push((tr("No, thanks"), "hdecline".to_string()));
+    } else if app.dispo.request.is_some() {
         first.push((tr("Accept"), "daccept".to_string()));
         first.push((tr("Decline"), "ddecline".to_string()));
     }
     let mut rest = Vec::new();
+    if app.tablet_tab == 2 {
+        for (id, name) in app.riders_in_my_bus() {
+            rest.push((name, format!("hgive {id}")));
+        }
+    }
     if app.tablet_tab == 4 {
         if let Some(b) = board_view(app) {
             for (i, l) in b.lines.iter().enumerate() {
@@ -648,6 +656,13 @@ pub(crate) fn tablet_items(app: &App) -> (Vec<(String, String)>, Vec<(String, St
 /// A control-room button of the tablet was used. True when it was one.
 pub(crate) fn tablet_action(app: &mut App, verb: &str, arg: &str) -> bool {
     match verb {
+        "haccept" => app.answer_wheel(true),
+        "hdecline" => app.answer_wheel(false),
+        "hgive" => {
+            if let Ok(id) = arg.trim().parse::<u32>() {
+                app.offer_wheel(id);
+            }
+        }
         "daccept" => app.dispatch_answer(true),
         "ddecline" => app.dispatch_answer(false),
         "dline" => {

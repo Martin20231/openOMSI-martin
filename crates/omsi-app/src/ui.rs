@@ -1574,7 +1574,7 @@ impl Ui {
         if view.tab != 0 {
             match view.tab {
                 1 => self.tablet_timetable(r, scene, view, paint),
-                2 => self.tablet_vehicle(r, scene, view, paint),
+                2 => self.tablet_vehicle(r, scene, f, view, sel, items, &mut rects, paint),
                 3 => self.tablet_yard(r, scene, view, paint),
                 _ => match view.board.as_ref() {
                     Some(b) => self.tablet_board(r, scene, f, b, sel, items, &mut rects, paint),
@@ -1978,7 +1978,11 @@ impl Ui {
     /// The ask of the control room, over whatever the tablet shows: take the duty or not.
     #[allow(clippy::too_many_arguments)]
     fn tablet_request(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, view: &crate::tablet::TabletView, sel: usize, items: &[(&str, &str)], rects: &mut [[f32; 4]], p: TabletPaint) {
-        let Some(q) = view.request.as_ref() else { return };
+        // (a friend's offer of the wheel comes before an ask of the control room)
+        let wheel = view.wheel_offer.as_ref();
+        if wheel.is_none() && view.request.is_none() {
+            return;
+        }
         let s = p.s;
         // (the rest stays visible, darker; clicks beside the card still reach it)
         self.text.rounded(r, scene, [p.sx, p.sy, p.sx + p.sw, p.sy + p.sh], 16.0 * s, [8, 12, 17, 200]);
@@ -1989,6 +1993,26 @@ impl Ui {
         self.text.rounded(r, scene, [x0 - 1.0, y0 - 1.0, x0 + w + 1.0, y0 + h + 1.0], 16.0 * s, [58, 74, 94, 255]);
         self.text.rounded(r, scene, [x0, y0, x0 + w, y0 + h], 16.0 * s, p.card);
         let inn = 24.0 * s;
+        if let Some(who) = wheel {
+            let from = omsi_ui::tr("Change of driver · {who}").replace("{who}", who);
+            self.put(r, scene, &clip_to(&self.text, &from, 12.0 * s, w - inn * 2.0), (12.0 * s) as u32, [p.blue[0], p.blue[1], p.blue[2], 0], x0 + inn, y0 + 28.0 * s);
+            self.put(r, scene, &omsi_ui::tr("Take the wheel?").into_owned(), (22.0 * s) as u32, p.ink, x0 + inn, y0 + 58.0 * s);
+            let lines = [omsi_ui::tr("{who} offers you his bus.").replace("{who}", who), omsi_ui::tr("You drive it from where it stands; your own bus stays where you left it.").into_owned()];
+            let mut y = y0 + 100.0 * s;
+            for l in &lines {
+                for row in wrap(&self.text, l, 14.0 * s, w - inn * 2.0) {
+                    self.put(r, scene, &row, (14.0 * s) as u32, p.ink, x0 + inn, y);
+                    y += 22.0 * s;
+                }
+                y += 6.0 * s;
+            }
+            let bw = (w - inn * 2.0 - 12.0 * s) * 0.5;
+            let by = y0 + h - inn - 44.0 * s;
+            self.tablet_button(r, scene, f, sel, items, rects, "hdecline", [x0 + inn, by, x0 + inn + bw, by + 44.0 * s], &omsi_ui::tr("No, thanks"), [28, 40, 54, 255], p.ink, 15.0 * s);
+            self.tablet_button(r, scene, f, sel, items, rects, "haccept", [x0 + w - inn - bw, by, x0 + w - inn, by + 44.0 * s], &omsi_ui::tr("Take the wheel"), p.accent, [18, 14, 8, 0], 15.0 * s);
+            return;
+        }
+        let Some(q) = view.request.as_ref() else { return };
         let from = omsi_ui::tr("Control room · {who}").replace("{who}", &q.by);
         self.put(r, scene, &clip_to(&self.text, &from, 12.0 * s, w - inn * 2.0), (12.0 * s) as u32, [p.blue[0], p.blue[1], p.blue[2], 0], x0 + inn, y0 + 28.0 * s);
         self.put(r, scene, &omsi_ui::tr("New duty for you").into_owned(), (22.0 * s) as u32, p.ink, x0 + inn, y0 + 58.0 * s);
@@ -2295,7 +2319,8 @@ impl Ui {
         }
     }
 
-    fn tablet_vehicle(&mut self, r: &Renderer, scene: &mut Scene, view: &crate::tablet::TabletView, p: TabletPaint) {
+    #[allow(clippy::too_many_arguments)]
+    fn tablet_vehicle(&mut self, r: &Renderer, scene: &mut Scene, f: &Frame, view: &crate::tablet::TabletView, sel: usize, items: &[(&str, &str)], rects: &mut [[f32; 4]], p: TabletPaint) {
         let s = p.s;
         let gap = 14.0 * s;
         let left_w = (p.sw - p.pad * 2.0 - gap) * 0.56;
@@ -2348,6 +2373,27 @@ impl Ui {
         }
         if !view.depot.is_empty() {
             self.put(r, scene, &clip_to(&self.text, &depot_short(&view.depot), 13.0 * s, right_w - 32.0 * s), (13.0 * s) as u32, p.muted, side[0] + 16.0 * s, side[1] + 130.0 * s);
+        }
+        // the change of driver: a friend who rides along takes the wheel
+        if !view.riders.is_empty() {
+            let mut y = side[1] + 166.0 * s;
+            self.put(r, scene, &omsi_ui::tr("Change of driver").into_owned(), (12.0 * s) as u32, p.muted, side[0] + 16.0 * s, y);
+            y += 16.0 * s;
+            if !view.stands {
+                let hint = clip_to(&self.text, &omsi_ui::tr("Stop the bus first: the wheel changes hands at a standstill"), 12.0 * s, right_w - 32.0 * s);
+                self.put(r, scene, &hint, (12.0 * s) as u32, [p.orange[0], p.orange[1], p.orange[2], 0], side[0] + 16.0 * s, y + 10.0 * s);
+                y += 26.0 * s;
+            }
+            for (id, name) in &view.riders {
+                if y + 36.0 * s > side[3] - 10.0 * s {
+                    break;
+                }
+                let label = omsi_ui::tr("Hand over to {who}").replace("{who}", name);
+                let fill = if view.stands { p.accent } else { [28, 40, 54, 255] };
+                let ink = if view.stands { [18, 14, 8, 0] } else { p.muted };
+                self.tablet_button(r, scene, f, sel, items, rects, &format!("hgive {id}"), [side[0] + 16.0 * s, y, side[2] - 16.0 * s, y + 34.0 * s], &label, fill, ink, 13.0 * s);
+                y += 40.0 * s;
+            }
         }
     }
 

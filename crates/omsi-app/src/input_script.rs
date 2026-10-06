@@ -733,6 +733,11 @@ impl App {
             self.dispatch_command(from, rest);
             return;
         }
+        // the change of driver (`handover`)
+        if let Some(rest) = text.strip_prefix("drive ") {
+            self.handover_command(from, rest);
+            return;
+        }
         crate::admin::command(self, from, text);
     }
 

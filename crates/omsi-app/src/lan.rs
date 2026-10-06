@@ -2435,7 +2435,7 @@ pub fn settle_spawn(
 /// it must be a plain relative `.bus` / `.ovh` path (`omsi_net::vehicle_path`), found under
 /// one of our content roots, and a regular file of a sane size - never a device such as
 /// `/dev/zero`, never a file elsewhere on the disk.
-fn remote_bus_file(args: &Args, bus: &str) -> Result<PathBuf, String> {
+pub(crate) fn remote_bus_file(args: &Args, bus: &str) -> Result<PathBuf, String> {
     let rel = omsi_net::vehicle_path(bus)
         .ok_or_else(|| "not a vehicle file inside a content folder".to_string())?;
     let mut path = omsi_cfg::resolve_path(&args.root, &rel);

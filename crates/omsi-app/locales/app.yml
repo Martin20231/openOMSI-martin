@@ -24145,3 +24145,57 @@ _version: 2
 
 "Taken over: {name}, line {line}":
   de: "Übernommen: {name}, Linie {line}"
+
+"Take the wheel":
+  de: "Steuer übernehmen"
+
+"No, thanks":
+  de: "Nein, danke"
+
+"Change of driver":
+  de: "Fahrerwechsel"
+
+"Stop the bus first: the wheel changes hands at a standstill":
+  de: "Erst anhalten: Der Fahrerwechsel geht nur im Stand"
+
+"Hand over to {who}":
+  de: "An {who} übergeben"
+
+"Change of driver · {who}":
+  de: "Fahrerwechsel · {who}"
+
+"Take the wheel?":
+  de: "Steuer übernehmen?"
+
+"{who} offers you his bus.":
+  de: "{who} bietet dir seinen Bus an."
+
+"You drive it from where it stands; your own bus stays where you left it.":
+  de: "Du fährst ab der Stelle, wo er steht. Dein eigener Bus bleibt, wo du ihn abgestellt hast."
+
+"You offer {who} the wheel":
+  de: "Du bietest {who} das Steuer an"
+
+"The driver gets up…":
+  de: "Der Fahrer steht auf …"
+
+"That bus is not to be seen any more":
+  de: "Der Bus ist nicht mehr zu sehen"
+
+"{who} offers you the wheel: the tablet (F8) asks you":
+  de: "{who} bietet dir das Steuer an: Das Tablet (F8) fragt dich"
+
+"The driver kept the wheel":
+  de: "Der Fahrer hat das Steuer behalten"
+
+"{who} drives your bus now":
+  de: "{who} fährt jetzt deinen Bus"
+
+"{who} does not take the wheel":
+  de: "{who} übernimmt das Steuer nicht"
+
+"This bus is not installed here: the change of driver failed":
+  de: "Dieser Bus ist bei dir nicht installiert: Der Fahrerwechsel hat nicht geklappt"
+
+"You drive the bus now":
+  de: "Du fährst jetzt den Bus"

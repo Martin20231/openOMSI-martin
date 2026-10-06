@@ -157,6 +157,11 @@ pub(crate) struct TabletView {
     pub board: Option<crate::dispatch::BoardView>,
     /// A duty the control room asks this player to drive.
     pub request: Option<crate::dispatch::RequestView>,
+    /// A friend offers us the wheel of his bus: his name.
+    pub wheel_offer: Option<String>,
+    /// The players riding in the bus we drive, and whether it stands (the wheel may change hands).
+    pub riders: Vec<(u32, String)>,
+    pub stands: bool,
 }
 
 /// One stop of the trip under way.
@@ -604,6 +609,9 @@ pub(crate) fn tablet_view(app: &App) -> TabletView {
         notes,
         board: if app.tablet_tab == 4 { crate::dispatch::board_view(app) } else { None },
         request: crate::dispatch::request_view(app),
+        wheel_offer: app.handover.offer.as_ref().map(|o| o.1.clone()),
+        riders: app.riders_in_my_bus(),
+        stands: app.bus_stands(),
     }
 }
 
