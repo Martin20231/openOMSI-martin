@@ -1175,6 +1175,7 @@ pub(crate) fn run_offscreen(
                             look_of(args),
                             &args.view,
                             settings.seat_pitch_deg,
+                            false,
                         );
                         cam = p.camera_look(&args.view, &camera, look, offscreen_orbit());
                         if args.view == "outside" {
@@ -1604,6 +1605,7 @@ pub(crate) fn run_offscreen(
                     look_of(&args),
                     &args.view,
                     settings.seat_pitch_deg,
+                    false,
                 );
                 let cam =
                     player.camera_look(&args.view, &camera, look, offscreen_orbit());
@@ -1876,6 +1878,7 @@ pub(crate) fn run_offscreen(
                 look_of(args),
                 &args.view,
                 settings.seat_pitch_deg,
+                false,
             );
             camera = player.camera_look(&args.view, &camera, look, offscreen_orbit());
             if args.view == "outside" {
@@ -2464,6 +2467,8 @@ pub(crate) fn run_offscreen(
     let daylight = omsi_sim::Daylight::compute(&clock, envir.as_ref());
     world.set_lamps(&renderer, &mut scene, daylight.lamps_on);
     world.update_night_modes(&renderer, &mut scene, &clock, daylight.brightness);
+    // (the physical model at the map's own place and the picture's moment)
+    let weather = crate::weather_model::refresh(&clock).unwrap_or(weather);
     // a run starts with the roads already in the state this weather would leave them
     let mut wetness = initial_wetness(&weather);
     if let Some(v) = omsi_cfg::env::var("OMSI_WETNESS")
@@ -2559,7 +2564,8 @@ pub(crate) fn run_offscreen(
             rn.tick(
                 1.0 / 30.0,
                 camera.position,
-                Vec3::ZERO,
+                // ([wind] direction (deg) and speed (m/s), as the window's frame takes it)
+                Vec3::new(weather.wind.0.to_radians().sin() * weather.wind.1, weather.wind.0.to_radians().cos() * weather.wind.1, 0.0),
                 &mut scene,
                 &player_ref.as_ref().or(player.as_ref()).map(|p| rain::vehicle_boxes(&p.vehicle)).unwrap_or_default(),
             );
