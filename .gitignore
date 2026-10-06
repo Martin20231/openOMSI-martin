@@ -14,3 +14,15 @@ node_modules/
 /android/debug.keystore
 /android/build
 tools/greenteaspeak-plugin/*.zip
+
+# Martin's build helpers (AUTO-BAUEN, bau-schritt, pruefen, testen) write these; the game
+# they build goes to openOMSI-spline, the Windows runtime files lie beside it
+/bau-log.txt
+/bau-status.txt
+/bau-auftrag.txt
+/bau-tests.txt
+/test-log.txt
+/pruef-log.txt
+/openOMSI-spline/
+/*.dll
+/*.exe

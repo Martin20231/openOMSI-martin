@@ -1,0 +1,38 @@
+---
+description: Wie openOMSI auf Martins Windows-PC geprüft, getestet und gebaut wird
+alwaysApply: true
+---
+
+# Bauen, prüfen, testen (Windows, im Ordner openOMSI-main)
+
+Alle Skripte setzen selbst `PATH` (Cargo) und `CARGO_TARGET_DIR=%LOCALAPPDATA%\openOMSI-build`.
+Immer diese Skripte benutzen, nicht `cargo` direkt: ein anderer Target-Ordner würde alles
+neu bauen (über 15 Minuten).
+
+| Zweck | Befehl | Dauer | Ergebnis |
+|---|---|---|---|
+| Compiler-Fehler finden | `cmd /c pruefen.cmd` | ~1 Min | Konsole + `pruef-log.txt` |
+| Tests | `cmd /c testen.cmd -p omsi-launcher-core company::` | 1–6 Min | Konsole + `test-log.txt` |
+| Spiel bauen | `cmd /c bau-schritt.cmd fast` | 3–6 Min | `bau-status.txt`, `bau-log.txt`, exe in `openOMSI-spline` |
+| Fertige Version | `cmd /c bau-schritt.cmd release` | lang | wie oben |
+
+## Fehler lesen
+- In `pruef-log.txt` / `bau-log.txt` nach Zeilen suchen, die mit `error` beginnen. Die Zeilen
+  danach nennen Datei und Zeile (` --> crates/...:123:45`).
+- Warnungen (`warning`) sind meistens schon im Original da. Nur eigene neue Warnungen beheben.
+- `NICHT-KOPIERT` in `bau-status.txt`: Das Spiel lief noch. Martin bitten, openOMSI zu
+  schließen, dann `bau-schritt.cmd fast` noch einmal.
+
+## Häufige Fehler und Lösungen (schon passiert)
+- `E0063 missing field` bei `Args { ... }` oder `Run { ... }`: ein Feld wurde einer Struktur
+  hinzugefügt. Alle Stellen suchen, die sie bauen (`..args.clone()` hilft bei Args).
+- `E0502 cannot borrow *self as immutable because ... mutable`: In `app_events.rs` ist
+  `self.scene` oft ausgeliehen. Werte vorher ausrechnen und in einem Feld ablegen
+  (Beispiel: `self.company_hud = self.company_line();` vor dem Zeichnen).
+- Text bleibt Englisch: Eintrag in `app.yml` fehlt, Schlüssel ist nicht exakt gleich
+  (Groß/Klein, Satzzeichen), oder der Text geht nicht durch `omsi_ui::tr`.
+
+## Alternative: AUTO-BAUEN.cmd
+Läuft `AUTO-BAUEN.cmd` bei Martin, kann man auch `fast` in `bau-auftrag.txt` schreiben.
+Tests dann zeilenweise in `bau-tests.txt` (`-p <crate> <filter>`). Für Cursor ist der direkte
+Aufruf oben einfacher, weil man das Ergebnis sofort im Terminal sieht.

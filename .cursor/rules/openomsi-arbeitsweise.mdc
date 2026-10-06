@@ -1,0 +1,50 @@
+---
+description: Wie in diesem Projekt gearbeitet und mit Martin gesprochen wird
+alwaysApply: true
+---
+
+# Arbeitsweise im Projekt openOMSI (für Martin)
+
+## Mit Martin sprechen
+- Immer Deutsch, einfach und kurz. Martin ist Programmierer, kann aber kein Rust.
+  Rust-Begriffe nur, wenn nötig, dann in einem halben Satz erklären.
+- Am Anfang einer Aufgabe in einem Satz sagen, was du vorhast. Dann loslegen,
+  keine langen Pläne zur Freigabe, außer die Aufgabe ist groß oder unklar.
+- Am Ende: was jetzt anders ist, was Martin tun muss (meist: `openOMSI-spline` auf den
+  Spiele-PC kopieren und ausprobieren), und was noch offen ist. Keine Liste aller Schritte.
+- Ehrlich bleiben: „gebaut und Tests grün“ ist nicht „funktioniert im Spiel“.
+  Was du nicht prüfen konntest, sagst du dazu.
+- Martin spielt auf einem zweiten PC. Du kannst das Spiel nicht selbst starten oder sehen.
+  Bitte um Screenshots, wenn du wissen musst, wie etwas im Spiel aussieht.
+
+## Vor dem Ändern
+- Zuerst `CURSOR-UEBERGABE.md` kennen (was schon gebaut ist, welche Dateien wozu).
+- Den betroffenen Code lesen, bevor du ihn änderst. Suche bestehende Funktionen, die
+  schon tun, was du brauchst (das Projekt ist groß, fast alles gibt es schon irgendwo:
+  Fahrzeuge platzieren, Startpunkte, Übersetzung, Launcher-Bausteine).
+- Bei neuen sichtbaren Funktionen (Seiten, Fenster, 3D-Dinge): erst kurz beschreiben oder
+  eine Skizze zeigen, wie es aussehen soll, und Martin entscheiden lassen. Kleine Fixes
+  sofort machen.
+
+## Beim Ändern
+- Kleine Schritte. Bestehende Muster im selben File nachmachen.
+- Keine neuen Crates/Abhängigkeiten, kein `cargo update`. Gebaut wird mit `--locked`.
+- Reine Logik (Rechnen, Auswählen, Text lesen/schreiben) in eigene Funktionen ohne Grafik
+  legen und dafür Tests schreiben (Beispiele: `omsi-launcher-core/src/company.rs`,
+  `omsi-app/src/depot.rs`).
+- Jeder neue sichtbare Text bekommt einen deutschen Eintrag in
+  `crates/omsi-app/locales/app.yml` (siehe Regel `openomsi-rust`).
+- Dateien, die Martin selbst bearbeitet (z. B. `company-values.cfg`), sind auf Deutsch.
+
+## Nach dem Ändern (Pflicht, siehe Regel `openomsi-bauen`)
+1. `cmd /c pruefen.cmd` – schnelle Prüfung auf Compiler-Fehler. Fehler selbst beheben,
+   wiederholen, bis „PRUEFUNG OK“.
+2. Tests der geänderten Teile: `cmd /c testen.cmd -p <crate> <modul>::`.
+3. `cmd /c bau-schritt.cmd fast` – fertige exe nach `openOMSI-spline`.
+   Status steht in `bau-status.txt` (ERFOLGREICH / FEHLGESCHLAGEN / NICHT-KOPIERT).
+4. Erst dann Martin melden, dass es fertig ist.
+
+## Nicht tun
+- Keine Dateien löschen oder große Umbauten ohne Martins Ja.
+- `AUTO-BAUEN.cmd` nicht ändern (es läuft oft im Hintergrund).
+- Nichts in Martins `~/.openomsi`-Ordner überschreiben (Firma, Einstellungen, Spielstände).

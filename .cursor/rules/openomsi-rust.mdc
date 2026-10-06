@@ -1,0 +1,42 @@
+---
+description: Code-Regeln für die Rust-Dateien von openOMSI (Muster, Übersetzung, Tests)
+globs: crates/**/*.rs, crates/**/*.yml
+alwaysApply: false
+---
+
+# Code-Regeln openOMSI
+
+## Aufbau
+- `crates/omsi-app` – Spiel und Launcher (eine exe). Launcher-Seiten in `src/launcher/`.
+  `App` (in `app.rs`) hält den Spielzustand; Methoden sind über viele Dateien verteilt
+  (`impl App` in `input_script.rs`, `on_foot.rs`, `depot.rs`, `company_lan.rs` ...).
+- `crates/omsi-launcher-core` (Lib-Name `omsi_launcher_lib`) – Logik ohne Grafik,
+  z. B. `company.rs` (nur std, darum leicht testbar).
+- Neue Module in `crates/omsi-app/src/lib.rs` mit `mod name;` eintragen. Module dort nutzen
+  meist `use super::*;` und haben dann `Args`, `World`, `Renderer`, `Scene`, `DVec3`, `spawn_player`.
+
+## Nützliche vorhandene Bausteine
+- Fahrzeug in die Welt stellen: `spawn_player(&args, &world, &renderer, &mut scene)` mit
+  `Args { bus, spawn: Some("x,y,heading[,z]"), ..args.clone() }`, dann in `App::placed`.
+- Einsteigen in ein abgestelltes Fahrzeug: `App::take_placed(k)`; zu Fuß mit G über `placed_cab_near`.
+- Startpunkte der Karte: `world.global.entry_points`, Ort mit `world.entry_point_place(ep)`.
+- Meldung oben im Spiel: `self.service_msg = Some((text, sekunden))`.
+- Launcher-UI: `l.ui.button(...)`, `l.ui.select(...)`, `l.ui.label(...)`, `l.ui.text_input(...)`,
+  `l.ui.panel(...)`, Farben/Abstände aus `launcher/theme.rs` (`GAP`, `ROW`, `ACCENT` ...).
+
+## Übersetzung
+- Sichtbare Texte auf Englisch schreiben und durch `omsi_ui::tr("...")` geben
+  (im Launcher oft schon automatisch bei `label`, `button`, `heading`).
+- Deutsche Übersetzung in `crates/omsi-app/locales/app.yml`:
+  ```yaml
+  "Start at the depot":
+    de: "Am Betriebshof starten"
+  ```
+  Vorher suchen, ob der Schlüssel schon existiert (dann nur `de:` ergänzen, nie doppelt anlegen).
+- Platzhalter: im Text `{name}` schreiben und nach `tr` mit `.replace("{name}", &wert)` füllen.
+
+## Stil
+- Kommentare auf Englisch, ganze Sätze, wie im übrigen Code; Nebenbemerkungen in `(…)`.
+- Keine `unwrap()` auf Dinge, die aus Dateien des Spielers kommen; lieber `Option`/`Result` und `log::warn!`.
+- Tests unten im File: `#[cfg(test)] mod tests { use super::*; ... }`, Namen als Satz
+  (`fn the_depot_holds_the_buses_not_on_the_road()`).
